@@ -57,7 +57,7 @@ check((await page.locator('.mini-stat strong').first().textContent()) === '18', 
 check(await page.locator('aside nav a').count() === 5, 'sidebar has five sections');
 check(await page.getByRole('button', { name: /Continue setup/ }).count() === 1, 'dashboard shows one next action for a draft set');
 check(await page.getByRole('link', { name: 'Open Round 2' }).count() === 1, 'the Round 2 card links to its area');
-check(await page.getByRole('link', { name: 'Open Round 3' }).count() === 0 && !(await page.locator('.page').innerText()).includes('Round 3'), 'Round 3 is hidden by default (Round 3 Availability)');
+check(await page.getByRole('link', { name: 'Open Round 3' }).count() === 0 && !(await page.locator('.page').innerText()).includes('Round 3'), 'no Round 3 card or text on the dashboard (Round 3 removed)');
 check(await page.locator('.timer').count() === 0, 'no timer on the dashboard');
 
 // Teams: add + duplicate prevention + search

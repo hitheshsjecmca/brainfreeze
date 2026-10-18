@@ -15,23 +15,3 @@ export function openRound2Projector(sessionId = null) {
   if (!w) window.location.assign(url);
   else w.focus();
 }
-
-/**
- * The Round 3 auction projector for one auction; without an id it shows the newest live auction. It is the
- * organiser-controlled screen (every auction control on the projector); `display` gives the audience-only view
- * with no controls, for a second screen.
- */
-export const round3ProjectorUrl = (sessionId = null, { display = false } = {}) => {
-  const q = new URLSearchParams();
-  if (sessionId) q.set('session', sessionId);
-  if (display) q.set('view', 'display');
-  const s = q.toString();
-  return `/projector/round3${s ? `?${s}` : ''}`;
-};
-
-export function openRound3Projector(sessionId = null, { display = false } = {}) {
-  const url = round3ProjectorUrl(sessionId, { display });
-  const w = window.open(url, display ? 'brainfreze-display-round3' : 'brainfreze-projector-round3', 'popup=yes,width=1280,height=720');
-  if (!w) window.location.assign(url);
-  else w.focus();
-}

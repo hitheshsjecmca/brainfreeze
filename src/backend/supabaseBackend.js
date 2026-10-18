@@ -8,7 +8,6 @@ import { toQuizError, fail } from '../lib/errors.js';
 import { publicQuestion } from './publicView.js';
 import { supabase } from './supabaseClient.js';
 import { setStage } from '../lib/engine.js';
-import { normalizeAppSettings } from '../lib/appSettings.js';
 
 const keyPatch = (p) => ({ correct_option: p.correct_option, marks_correct: p.marks_correct, marks_incorrect: p.marks_incorrect });
 
@@ -85,38 +84,6 @@ const R2_RPC = {
 const R2_RETURNS_ID = new Set(['r2sSaveSet', 'r2sSaveTopic', 'r2sSaveQuestion']);
 const r2Tiles = (topics) => (topics || []).map((t) => ({ ...t, questions: t.questions.map((x) => ({ ...x, points: Number(x.points) })) }));
 
-// Round 3 auction sets, versions and live auctions (migration 13). Every write is an organizer RPC;
-// scores, budgets and bid order are computed in the database.
-const r3Settings = (p) => p.settings ?? {}; // auction timer defaults (absent keys keep the set's / auction's value)
-const R3_RPC = {
-  r3sSaveSet: (p) => ['r3s_save_set', { p }],
-  r3sDeleteSet: (p) => ['r3s_delete_set', { p_set_id: p.id }],
-  r3sArchiveSet: (p) => ['r3s_archive_set', { p_set_id: p.id }],
-  r3sSaveTopic: (p) => ['r3s_save_topic', { p }],
-  r3sDeleteTopic: (p) => ['r3s_delete_topic', { p_id: p.id }],
-  r3sSaveQuestion: (p) => ['r3s_save_question', { p }],
-  r3sDeleteQuestion: (p) => ['r3s_delete_question', { p_id: p.id }],
-  r3sMove: (p) => ['r3s_move', { p_kind: p.kind, p_id: p.id, p_dir: p.dir }],
-  r3sPublishSet: (p) => ['r3s_publish_set', { p_set_id: p.id }],
-  r3sStartSession: (p) => ['r3s_start_session', { p_request_id: p.request_id, p_code: p.code, p_section: p.section, p_team_ids: p.team_ids, p_settings: r3Settings(p) }],
-  r3sUpdateSessionSettings: (p) => ['r3s_update_session_settings', { p_session_id: p.session_id, p_settings: r3Settings(p) }],
-  r3sSelectQuestion: (p) => ['r3s_select_question', { p_session_id: p.session_id, p_question_id: p.question_id }],
-  r3sCancelQuestion: (p) => ['r3s_cancel_question', { p_session_id: p.session_id, p_question_id: p.question_id }],
-  r3sStartBidding: (p) => ['r3s_start_bidding', { p_session_id: p.session_id, p_question_id: p.question_id, p_timer: p.timer ?? null }],
-  r3sRecordBid: (p) => ['r3s_record_bid', { p_session_id: p.session_id, p_question_id: p.question_id, p_team_id: p.team_id, p_amount: p.amount ?? null, p_pass: !!p.pass }],
-  r3sCloseBidding: (p) => ['r3s_close_bidding', { p_session_id: p.session_id, p_question_id: p.question_id }],
-  r3sResolveTie: (p) => ['r3s_resolve_tie', { p_session_id: p.session_id, p_question_id: p.question_id, p_order: p.order, p_reason: p.reason }],
-  r3sReopenBidding: (p) => ['r3s_reopen_bidding', { p_session_id: p.session_id, p_question_id: p.question_id, p_reason: p.reason }],
-  r3sRevealTopic: (p) => ['r3s_reveal_topic', { p_session_id: p.session_id, p_question_id: p.question_id }],
-  r3sRevealQuestion: (p) => ['r3s_reveal_question', { p_session_id: p.session_id, p_question_id: p.question_id }],
-  r3sRecordOutcome: (p) => ['r3s_record_outcome', { p_request_id: p.request_id, p_session_id: p.session_id, p_question_id: p.question_id, p_team_id: p.team_id, p_outcome: p.outcome }],
-  r3sNextBidder: (p) => ['r3s_next_bidder', { p_session_id: p.session_id, p_question_id: p.question_id }],
-  r3sRevealAnswer: (p) => ['r3s_reveal_answer', { p_session_id: p.session_id, p_question_id: p.question_id }],
-  r3sFinishQuestion: (p) => ['r3s_finish_question', { p_session_id: p.session_id, p_question_id: p.question_id }],
-  r3sEndAuction: (p) => ['r3s_end_auction', { p_session_id: p.session_id }],
-  r3sRevealResults: (p) => ['r3s_reveal_results', { p_session_id: p.session_id, p_reveal: !!p.reveal }],
-};
-const R3_RETURNS_ID = new Set(['r3sSaveSet', 'r3sSaveTopic', 'r3sSaveQuestion']);
 
 // RPCs that return a bare set id; the demo engine returns { id }.
 const RETURNS_ID = new Set(['createSet', 'duplicateSet', 'newSession']);
@@ -487,40 +454,6 @@ export const supabaseBackend = {
       const tables = host ? ['r2_sets', 'r2_set_topics', 'r2_set_questions', 'r2_sessions', 'r2_session_teams', 'r2_session_results', 'teams']
         : ['r2_sessions'];
       let ch = supabase.channel(`brainfreze-r2-${host ? 'host' : 'projector'}-${Math.random().toString(36).slice(2)}`);
-      for (const table of tables) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => onChange());
-      ch.subscribe((status) => onStatus?.(status));
-      return () => { supabase.removeChannel(ch); };
-    },
-  },
-
-  // Event-wide settings (migration 16): organizer-only RPCs; the database refuses Round 3 RPCs while it is disabled.
-  appSettings: {
-    get: async () => normalizeAppSettings(await q(supabase.rpc('get_app_settings'))),
-    setRound3Enabled: async (enabled) => normalizeAppSettings(await q(supabase.rpc('set_round3_enabled', { p_enabled: !!enabled }))),
-  },
-
-  // Round 3: every read is an organizer RPC. The projector board (p_host = false) never carries scores or
-  // unrevealed topics, questions or answers; the projector listens only to r3_sessions (every action touches it).
-  round3: {
-    overview: () => q(supabase.rpc('r3s_overview')),
-    setDetail: (id) => q(supabase.rpc('r3s_set_detail', { p_set_id: id })),
-    lookup: (code) => q(supabase.rpc('r3s_lookup', { p_code: code })),
-    eligible: (code, section) => q(supabase.rpc('r3s_eligible_teams', { p_code: code, p_section: section })),
-    async board(sessionId, { host = false } = {}) {
-      const [b, offset] = await Promise.all([q(supabase.rpc('r3s_board', { p_session_id: sessionId, p_host: host })), serverOffset()]);
-      return { ...b, serverOffsetMs: offset };
-    },
-    results: (sessionId) => q(supabase.rpc('r3s_results', { p_session_id: sessionId })),
-    async call(action, payload = {}) {
-      const map = R3_RPC[action];
-      if (!map) fail('UNKNOWN', `Unknown action ${action}`);
-      const [fn, args] = map(payload);
-      const data = await q(supabase.rpc(fn, args));
-      return R3_RETURNS_ID.has(action) ? { id: data } : data;
-    },
-    subscribe(onChange, onStatus, { host = true } = {}) {
-      const tables = host ? ['r3_sets', 'r3_set_topics', 'r3_set_questions', 'r3_sessions', 'r3_session_teams', 'r3_bids', 'r3_events', 'teams'] : ['r3_sessions'];
-      let ch = supabase.channel(`brainfreze-r3-${host ? 'host' : 'projector'}-${Math.random().toString(36).slice(2)}`);
       for (const table of tables) ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => onChange());
       ch.subscribe((status) => onStatus?.(status));
       return () => { supabase.removeChannel(ch); };

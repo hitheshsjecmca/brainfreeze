@@ -24,7 +24,6 @@ import { SAMPLE_QUESTIONS } from '../data/sampleQuestions.js';
 import { DEMO_PG_TEAMS, DEMO_TEAMS } from '../data/demoTeams.js';
 import { normalizeJoinCode, randomJoinCode, randomPin, randomToken } from './joinCodes.js';
 import { normalizeRound2 } from './round2Engine.js';
-import { normalizeRound3 } from './round3Engine.js';
 
 const iso = (ms) => new Date(ms).toISOString();
 
@@ -164,7 +163,6 @@ export function normalizeState(state) {
   for (const e of s.events) e.source ??= 'organizer';
   s.format_version = BACKUP_FORMAT_VERSION;
   normalizeRound2(s); // Round 2 data (separate slice; mirrors the r2_* foreign keys)
-  normalizeRound3(s); // Round 3 auction data (separate slice; mirrors the r3_* foreign keys)
   return s;
 }
 
@@ -1470,7 +1468,6 @@ const global = {
       retired_codes: [...st.retired_codes, ...st.sets.map((x) => x.session.join_code).filter(Boolean)],
       next_event_id: b.events.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0) + 1,
     });
-    if (st.app_settings) next.app_settings = st.app_settings; // event-wide settings are not part of a backup
     // Round 2 is not part of a Round 1 backup. Like restore_backup in SQL (teams are deleted and re-inserted),
     // session teams are cleared and results keep only their team snapshot.
     if (st.round2) {
@@ -1478,16 +1475,8 @@ const global = {
       if (next.round2.sessions) next.round2.sessions = next.round2.sessions.map((g) => ({ ...g, team_ids: [] }));
       if (next.round2.teams) next.round2.teams = [];
     }
-    // Round 3 likewise: auction team rows and bids go with the deleted teams; the ledger keeps its name snapshots.
-    if (st.round3) {
-      next.round3 = {
-        ...st.round3,
-        sessions: (st.round3.sessions || []).map((g) => ({ ...g, teams: [] })),
-        bids: [],
-        events: (st.round3.events || []).map((e) => ({ ...e, team_id: null })),
-        results: (st.round3.results || []).map((x) => ({ ...x, winner_team_id: null, top_team_id: null })),
-      };
-    }
+    // Demo data from the removed Round 3 (if any) is kept untouched; nothing reads it any more.
+    if (st.round3) next.round3 = st.round3;
     // Restored live sets are paused now; the time since their clocks last ran counts as paused time.
     for (const { session, frozen_at } of b.sets) {
       if (session.status !== 'paused') continue;
@@ -1620,7 +1609,6 @@ export function applyAction(state, name, payload = {}, ctx = {}) {
     });
   }
   normalizeRound2(st); // like the database's foreign keys: a deleted team leaves its Round 2 sessions at once
-  normalizeRound3(st); // … and its Round 3 auctions
   st.updated_at = iso(c.now);
   return { state: st, result };
 }

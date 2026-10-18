@@ -2,7 +2,6 @@
 // SQL functions raise messages in the form "CODE: human readable detail".
 export const ERROR_MESSAGES = {
   NOT_AUTHORIZED: 'This account is not authorized for this action.',
-  ROUND3_DISABLED: 'Round 3 is disabled. An organizer can enable it in Settings & Backup.',
   DB_PERMISSION_MISSING: 'The database has not granted signed-in users permission to run this function. Apply the latest permissions migration in Supabase.',
   NO_SESSION: 'No active quiz session was found.',
   QUIZ_NOT_STARTED: 'The quiz has not started yet. Start the quiz before recording answers.',
@@ -39,39 +38,6 @@ export const ERROR_MESSAGES = {
   INVALID_BACKUP: 'This file is not a valid BRAINFREZE backup.',
   NETWORK: 'Network error — the action may not have reached the server.',
   // Round 2 trivia board
-  R3_NOT_FOUND: 'That Round 3 auction set, topic or question no longer exists.',
-  R3_SET_ARCHIVED: 'This auction set is archived.',
-  R3_SET_PUBLISHED: 'A published auction set cannot be deleted. Archive it instead.',
-  R3_SNAPSHOT_IMMUTABLE: 'A published auction version cannot be changed. Edit the draft and publish a new version.',
-  R3_CODE_INVALID: 'No published auction set has that code.',
-  R3_SECTION_MISMATCH: 'This auction set is not for that section.',
-  R3_TEAM_COUNT: 'Select at least one team.',
-  R3_TEAM_NOT_ELIGIBLE: 'Every selected team must be a registered team of the section.',
-  R3_SESSION_LIVE: 'An auction is already live for this section. End it first.',
-  R3_SESSION_NOT_FOUND: 'Round 3 auction not found.',
-  R3_SESSION_ENDED: 'This auction has ended.',
-  R3_QUESTION_ACTIVE: 'Another question is open. Finish or cancel it first.',
-  R3_QUESTION_USED: 'This question has already been played.',
-  R3_QUESTION_LIVE: 'The question is already revealed. Record the outcomes instead.',
-  R3_NOT_SELECTED: 'That question is not the one open in this auction.',
-  R3_WRONG_PHASE: 'That action is not possible in the current auction phase.',
-  R3_BIDDING_OPEN: 'Close bidding first.',
-  R3_BIDDING_CLOSED: 'Bidding is closed for this question; bids are locked.',
-  R3_BIDDING_RUNNING: 'Bidding is already open. Its timer cannot be restarted or extended.',
-  R3_BIDDING_TIME_UP: 'The bidding time is over. Close bidding, or restart the bidding timer.',
-  R3_TEAM_NOT_IN_AUCTION: 'That team is not in this auction.',
-  R3_CANNOT_BID: 'This team has less than 10 left and must pass.',
-  R3_BID_TOO_LOW: 'The minimum bid is 10.',
-  R3_BID_STEP: 'Bids go up in steps of 10.',
-  R3_BID_OVER_BUDGET: "The bid is more than the team's budget.",
-  R3_TIE_ORDER: 'Only equal bids can be reordered, and every bidding team must be listed once.',
-  R3_TIE_UNRESOLVED: 'Resolve the tie for the highest bid first.',
-  R3_TOPIC_HIDDEN: 'Reveal the topic of this blind question first.',
-  R3_NOT_CURRENT_TEAM: "It is not this team's turn to answer.",
-  R3_ALREADY_ANSWERED: 'This team already had its turn on this question.',
-  R3_TIMER_RUNNING: 'The answer timer is still running.',
-  R3_NOT_REVEALED: 'Reveal the question first.',
-  R3_NOT_ENDED: 'End the auction before revealing the final results.',
   TRIVIA_NOT_FOUND: 'That Round 2 topic or question no longer exists.',
   TRIVIA_QUESTION_ACTIVE: 'Another question is open on the board. Finish or cancel it first.',
   TRIVIA_QUESTION_USED: 'This question has already been played.',
@@ -131,7 +97,7 @@ const OUTDATED_COUNT_RULE = /30 to 60|at most 60/;
 export const OUTDATED_DATABASE_MESSAGE = 'The database still enforces the old 30–60 question rule. Apply supabase/migrations/20261018000100_round1_simplify_setup.sql to the Supabase project, then publish again.';
 
 // The newest migration always re-applies the complete function permission set (and is safe to re-run).
-export const PERMISSIONS_REPAIR_MIGRATION = '20261026000100_round3_availability.sql';
+export const PERMISSIONS_REPAIR_MIGRATION = '20261025000100_manual_team_selection.sql';
 
 // Normalize anything thrown by Supabase / fetch / engine into a QuizError.
 export function toQuizError(err) {

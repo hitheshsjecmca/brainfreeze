@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { applyAction, createEmptyState, setSummaries, setView, sessionQuestions } from '../src/lib/engine.js';
 import {
-  HOST_NAV, LEGACY_ROUTES, ROUND1_TABS, ROUND3_TABS, ROUNDS, resultsStatus, round1NextAction, round1Summary, round1TeamStatus, setProgress,
+  HOST_NAV, LEGACY_ROUTES, ROUND1_TABS, ROUNDS, resultsStatus, round1NextAction, round1Summary, round1TeamStatus, setProgress,
 } from '../src/lib/rounds.js';
 import { selectTeams } from './helpers/engine.js';
 
@@ -35,17 +35,12 @@ describe('organizer navigation', () => {
     for (const to of Object.values(LEGACY_ROUTES)) expect(ROUND1_TABS.map((t) => t.to)).toContain(to);
     expect(app).toContain('path="rounds/2" element={<Round2Layout />}');
     expect(app).toContain('path="/projector/round2"');
-    expect(app).toContain('path="rounds/3" element={<RequireRound3><Round3Layout /></RequireRound3>}');
-    expect(app).toContain('<RequireRound3><ProjectorRound3 /></RequireRound3>');
-    expect(app).toContain('path="/projector/round3"');
-    for (const t of ROUND3_TABS) {
-      const sub = t.to.replace('/host/rounds/3', '').replace(/^\//, '');
-      if (sub) expect(app).toContain(`path="${sub}"`);
-    }
+    // Round 3 (THE KNOWLEDGE AUCTION) was removed: no routes; old URLs fall through to the catch-all redirect.
+    expect(app).not.toMatch(/rounds\/3|projector\/round3|Round3/);
+    expect(app).toContain('<Route path="*" element={<Navigate to="/" replace />} />');
   });
-  it('all three rounds are implemented; Round 3 has the four auction sections', () => {
-    expect(ROUNDS.map((r) => [r.id, r.implemented])).toEqual([[1, true], [2, true], [3, true]]);
-    expect(ROUND3_TABS.map((t) => t.label)).toEqual(['Auction Sets', 'Join Round 3', 'Live Auction', 'Round 3 Results']);
+  it('Rounds 1 and 2 are the event rounds', () => {
+    expect(ROUNDS.map((r) => [r.id, r.implemented])).toEqual([[1, true], [2, true]]);
   });
 });
 

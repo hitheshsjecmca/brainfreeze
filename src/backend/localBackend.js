@@ -10,8 +10,6 @@ import { applyAction, backupData, createDemoState, normalizeState, resolveSetId,
 import { QuizError, toQuizError } from '../lib/errors.js';
 import { buildPublicSnapshot } from './publicView.js';
 import { applyRound2, round2EligibleTeams, round2Lookup, round2Overview, round2SessionBoard, round2SetDetail } from '../lib/round2Engine.js';
-import { normalizeAppSettings, requireRound3 } from '../lib/appSettings.js';
-import { applyRound3, round3EligibleTeams, round3Lookup, round3Overview, round3Results, round3SessionBoard, round3SetDetail } from '../lib/round3Engine.js';
 
 const DB_NAME = 'brainfreze-cold-start-demo';
 const STORE = 'kv';
@@ -208,31 +206,6 @@ export const localBackend = {
     eligible: async (code, section) => round2EligibleTeams(await read(), code, section),
     board: async (sessionId, { host = false } = {}) => ({ ...round2SessionBoard(await read(), sessionId, { host, nowMs: Date.now() }), serverOffsetMs: 0 }),
     call: (action, payload = {}) => transact((st) => applyRound2(st, action, payload, { now: Date.now() })),
-    subscribe(onChange, onStatus) {
-      listeners.add(onChange);
-      onStatus?.('SUBSCRIBED');
-      return () => listeners.delete(onChange);
-    },
-  },
-
-  // Event-wide settings (same shape as get_app_settings / set_round3_enabled).
-  appSettings: {
-    get: async () => normalizeAppSettings((await read()).app_settings),
-    setRound3Enabled: (enabled) => transact((st) => {
-      const app_settings = { ...normalizeAppSettings(st.app_settings), round3_enabled: !!enabled, updated_at: new Date().toISOString() };
-      return { state: { ...st, app_settings }, result: app_settings };
-    }),
-  },
-
-  // Round 3 auction sets and live auctions (same shapes as the Supabase r3s_* functions). Refused while Round 3 is disabled.
-  round3: {
-    overview: async () => round3Overview(requireRound3(await read())),
-    setDetail: async (id) => round3SetDetail(requireRound3(await read()), id),
-    lookup: async (code) => round3Lookup(requireRound3(await read()), code),
-    eligible: async (code, section) => round3EligibleTeams(requireRound3(await read()), code, section),
-    board: async (sessionId, { host = false } = {}) => ({ ...round3SessionBoard(requireRound3(await read()), sessionId, { host, nowMs: Date.now() }), serverOffsetMs: 0 }),
-    results: async (sessionId) => round3Results(requireRound3(await read()), sessionId),
-    call: (action, payload = {}) => transact((st) => applyRound3(requireRound3(st), action, payload, { now: Date.now() })),
     subscribe(onChange, onStatus) {
       listeners.add(onChange);
       onStatus?.('SUBSCRIBED');

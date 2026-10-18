@@ -2,12 +2,11 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, Download, Eye, EyeOff, Lock, RotateCcw, Sparkles, Trophy } from 'lucide-react';
 import { useQuiz } from '../context/QuizContext.jsx';
-import { useAppSettings } from '../context/AppSettingsContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import { PageHeader } from '../components/Common.jsx';
 import SetResults from '../components/SetResults.jsx';
 import { SetPicker } from '../components/Round1Layout.jsx';
-import { ROUNDS, resultsStatus, visibleRounds } from '../lib/rounds.js';
+import { ROUNDS, resultsStatus } from '../lib/rounds.js';
 import { formatElapsed } from '../lib/sets.js';
 import { formatPoints } from '../lib/scoring.js';
 import { standingsCSV } from '../lib/exports.js';
@@ -16,16 +15,13 @@ import { TIEBREAK_QUESTIONS } from '../data/tiebreakQuestions.js';
 
 const STATUS_CLASS = { finalized: 'badge-ok', review: 'badge-amber', provisional: 'badge-ice', none: 'badge-muted' };
 
-/** Results for every round: Round 1 per quiz set here; Rounds 2 and 3 link to their own result pages. */
+/** Results for every round: Round 1 per quiz set here; Round 2 links to its own result pages. */
 export default function Results() {
-  const [picked, setRound] = useState(1);
-  const { round3Enabled } = useAppSettings();
-  const rounds = visibleRounds(round3Enabled);
-  const round = rounds.some((r) => r.id === picked) ? picked : 1;
+  const [round, setRound] = useState(1);
   return (
     <div className="page">
       <div className="segmented results-rounds" role="tablist" aria-label="Round">
-        {rounds.map((r) => (
+        {ROUNDS.map((r) => (
           <button key={r.id} role="tab" aria-selected={round === r.id} className={round === r.id ? 'active' : ''} onClick={() => setRound(r.id)}>
             Round {r.id}{r.implemented ? '' : ' (not implemented)'}
           </button>
@@ -34,9 +30,7 @@ export default function Results() {
       {round === 1 ? <Round1Results /> : (
         <section className="panel glass">
           <h2>Round {round} — {ROUNDS[round - 1].name}</h2>
-          {round === 2
-            ? <p className="muted">Round 2 scores and score logs are kept per game on the <Link to="/host/rounds/2">Round 2 Dashboard</Link>.</p>
-            : <p className="muted">Final rankings, per-team summaries and CSV export for every auction are on <Link to="/host/rounds/3/results">Round 3 Results</Link>.</p>}
+          <p className="muted">Round 2 scores and score logs are kept per game on the <Link to="/host/rounds/2">Round 2 Dashboard</Link>.</p>
         </section>
       )}
     </div>

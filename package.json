@@ -16,8 +16,7 @@
     "test:e2e": "node scripts/e2e-demo.mjs",
     "check": "npm run lint && npm test && npm run build",
     "test:e2e:sets": "node scripts/e2e-sets.mjs",
-    "test:e2e:round2": "node scripts/e2e-round2.mjs",
-    "test:e2e:round3": "node scripts/e2e-round3.mjs"
+    "test:e2e:round2": "node scripts/e2e-round2.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",

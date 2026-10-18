@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, Lock, RotateCcw, Users } from 'lucide-react';
 import { useQuiz } from '../context/QuizContext.jsx';
-import { useAppSettings } from '../context/AppSettingsContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import { PageHeader } from '../components/Common.jsx';
 import TeamPicker from '../components/TeamPicker.jsx';
@@ -25,7 +24,6 @@ export default function Round1Participants() {
 }
 
 function ParticipantsEditor() {
-  const { round3Enabled } = useAppSettings();
   const { snap, sets, act, pendingKeys } = useQuiz();
   const { confirm } = useUI();
   const s = snap.session;
@@ -108,7 +106,7 @@ function ParticipantsEditor() {
               <button className="btn btn-ghost" onClick={() => setDraft(saved)} disabled={!dirty}><RotateCcw size={16} /> Discard changes</button>
             </div>
           )}
-          <p className="muted small">The set can go live only after at least one participant is confirmed. {round3Enabled ? 'Round 2 and Round 3 have their own, separate team selection.' : 'Round 2 has its own, separate team selection.'}</p>
+          <p className="muted small">The set can go live only after at least one participant is confirmed. Round 2 has its own, separate team selection.</p>
         </section>
       </div>
     </div>

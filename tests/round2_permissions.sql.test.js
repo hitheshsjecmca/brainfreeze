@@ -133,7 +133,7 @@ describe('error messages', () => {
     const e = toQuizError({ code: '42501', message: 'permission denied for function r2s_overview' });
     expect(e.code).toBe('DB_PERMISSION_MISSING');
     expect(e.message).toMatch(/r2s_overview/);
-    expect(e.message).toMatch(/20261026000100_round3_availability\.sql/);
+    expect(e.message).toMatch(/20261025000100_manual_team_selection\.sql/);
   });
 
   it('a real organizer rejection is still NOT_AUTHORIZED', () => {

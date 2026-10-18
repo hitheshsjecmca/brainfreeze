@@ -1,7 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, ChevronRight, MonitorPlay } from 'lucide-react';
 import { useQuiz } from '../context/QuizContext.jsx';
-import { useAppSettings } from '../context/AppSettingsContext.jsx';
 import { PageHeader } from '../components/Common.jsx';
 import { RoundCard } from './Rounds.jsx';
 import { openProjector } from '../lib/projectorWindow.js';
@@ -11,7 +10,6 @@ import { SECTIONS } from '../lib/constants.js';
 /** Event-level overview: next recommended step, a few accurate counts, the event flow and the round cards. */
 export default function Dashboard() {
   const { snap, sets, selectSet } = useQuiz();
-  const { round3Enabled } = useAppSettings();
   const navigate = useNavigate();
   const r1 = round1Summary(sets);
   const next = round1NextAction(sets);
@@ -41,12 +39,11 @@ export default function Dashboard() {
         <Stat label="Qualification" value={r1.completed ? `${r1.finalized}/${r1.completed}` : '—'} detail={r1.completed ? 'completed sets with confirmed qualifiers' : 'No completed sets yet'} />
       </section>
 
-      <EventFlow r1={r1} round3Enabled={round3Enabled} />
+      <EventFlow r1={r1} />
 
       <div className="round-grid">
         <RoundCard id={1} withAction={false} />
         <RoundCard id={2} />
-        {round3Enabled && <RoundCard id={3} />}
       </div>
     </div>
   );
@@ -62,22 +59,13 @@ function Stat({ label, value, detail, small }) {
   );
 }
 
-/**
- * The intended event sequence. Only the Round 1 steps reflect real data; Rounds 2 and 3 are run from their own areas.
- * While Round 3 is disabled the sequence ends with Round 2's results.
- */
-function EventFlow({ r1, round3Enabled }) {
+/** The intended event sequence. Only the Round 1 steps reflect real data; Round 2 is run from its own area. */
+function EventFlow({ r1 }) {
   const steps = [
     { label: 'Round 1', state: r1.status === 'qualified' ? 'done' : ['live', 'review', 'ready'].includes(r1.status) ? 'current' : 'todo' },
     { label: 'Top 5 confirmed', state: r1.status === 'qualified' ? 'done' : r1.completed ? 'current' : 'todo', note: r1.completed ? `${r1.finalized}/${r1.completed} sets` : null },
     { label: 'Round 2', state: 'todo', note: 'trivia board' },
-    ...(round3Enabled ? [
-      { label: 'Top 3', state: 'todo', note: 'organizer choice' },
-      { label: 'Round 3', state: 'todo', note: 'knowledge auction' },
-      { label: 'Winner', state: 'todo' },
-    ] : [
-      { label: 'Round 2 results', state: 'todo' },
-    ]),
+    { label: 'Round 2 results', state: 'todo' },
   ];
   return (
     <ol className="event-flow" aria-label="Event flow">

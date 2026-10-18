@@ -1,15 +1,10 @@
 // Event structure (JOSHIANA 15.0 · WINTER ARC) and Round 1 status derived ONLY
-// from existing data (quiz-set summaries). Round 2 (trivia board) and Round 3 (knowledge auction)
-// have their own areas.
+// from existing data (quiz-set summaries). Round 2 (trivia board) has its own area.
 
 export const ROUNDS = [
   { id: 1, name: 'COLD START', subtitle: 'MCQ Round', implemented: true, advance: 'The organisers choose the participating teams for each set' },
   { id: 2, name: 'MIND MELTDOWN', subtitle: 'Trivia Round', implemented: true, advance: 'The organisers choose the participating teams for each game' },
-  { id: 3, name: 'THE KNOWLEDGE AUCTION', subtitle: 'Final Round — THINK. BID. RISK. WIN.', implemented: true, advance: 'The organisers choose the participating teams for each auction' },
 ];
-
-/** The rounds shown in the interface: Round 3 only while an organizer has enabled it (Round 3 Availability). */
-export const visibleRounds = (round3Enabled) => ROUNDS.filter((r) => r.id !== 3 || round3Enabled);
 
 /** Organizer navigation: five sections. Round pages live under /host/rounds. */
 export const HOST_NAV = [
@@ -36,14 +31,6 @@ export const ROUND2_TABS = [
   { to: '/host/rounds/2', end: true, label: 'Round 2 Dashboard' },
   { to: '/host/rounds/2/sets', label: 'Trivia Sets' },
   { to: '/host/rounds/2/join', label: 'Join Round 2' },
-];
-
-/** Round 3 area tabs: auction sets, starting an auction, the live auction and its results. */
-export const ROUND3_TABS = [
-  { to: '/host/rounds/3/sets', label: 'Auction Sets' },
-  { to: '/host/rounds/3/join', label: 'Join Round 3' },
-  { to: '/host/rounds/3', end: true, label: 'Live Auction' },
-  { to: '/host/rounds/3/results', label: 'Round 3 Results' },
 ];
 
 /** Old organizer URLs → their new place (bookmarks keep working). */

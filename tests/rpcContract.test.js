@@ -35,7 +35,6 @@ const organizerCalls = parseCalls(section('RPC'));
 const registrationCalls = parseCalls(section('REG_RPC'));
 const participantCalls = parseCalls(section('PARTICIPANT_RPC'));
 const round2Calls = parseCalls(section('R2_RPC'));
-const round3Calls = parseCalls(section('R3_RPC'));
 const direct = [...backend.matchAll(/(?:supabase\.rpc|setRpc)\('(\w+)'/g)].map((m) => m[1]);
 
 describe('Supabase RPC contract', () => {
@@ -60,17 +59,11 @@ describe('Supabase RPC contract', () => {
     expect(anonGrants).not.toContain('public.r2');
   });
 
-  it('finds the Round 3 RPC map (auction sets and live auctions, migration 13)', () => {
-    expect(round3Calls.map((c) => c.fn)).toEqual(expect.arrayContaining([
-      'r3s_save_set', 'r3s_move', 'r3s_publish_set', 'r3s_start_session', 'r3s_record_bid', 'r3s_close_bidding', 'r3s_resolve_tie',
-      'r3s_reveal_topic', 'r3s_reveal_question', 'r3s_record_outcome', 'r3s_next_bidder', 'r3s_end_auction', 'r3s_reveal_results',
-    ]));
-    for (const fn of ['r3s_overview', 'r3s_set_detail', 'r3s_lookup', 'r3s_eligible_teams', 'r3s_board', 'r3s_results']) expect(backend).toContain(`supabase.rpc('${fn}'`);
-    expect(authGrants).toContain('public.r3s_board(uuid, boolean)');
-    expect(anonGrants).not.toContain('public.r3');
+  it('the app no longer calls any Round 3 RPC (Round 3 was removed from the app)', () => {
+    expect(backend).not.toMatch(/r3s_|R3_RPC/);
   });
 
-  for (const { fn, args } of [...organizerCalls, ...registrationCalls, ...round2Calls, ...round3Calls]) {
+  for (const { fn, args } of [...organizerCalls, ...registrationCalls, ...round2Calls]) {
     it(`${fn}(${args.join(', ')}) matches SQL, granted to authenticated only`, () => {
       expect(fns.has(fn), `function ${fn} missing`).toBe(true);
       for (const a of args) expect(fns.get(fn), `${fn} lacks param ${a}`).toContain(a);

@@ -1,6 +1,5 @@
-import { useRef, useState } from 'react';
-import { Archive, Database, Download, FileUp, RotateCcw, Save, ShieldCheck, ToggleLeft, Trash2 } from 'lucide-react';
-import { useAppSettings } from '../context/AppSettingsContext.jsx';
+import { useRef } from 'react';
+import { Archive, Database, Download, FileUp, RotateCcw, Save, ShieldCheck, Trash2 } from 'lucide-react';
 import { useQuiz } from '../context/QuizContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import { PageHeader } from '../components/Common.jsx';
@@ -122,8 +121,6 @@ export default function SettingsPage() {
         </section>
       </div>
 
-      <Round3AvailabilityPanel />
-
       <div className="two-col">
         <section className="panel glass" aria-labelledby="bk-title">
           <h2 id="bk-title"><Database size={18} /> Backup & restore</h2>
@@ -162,59 +159,5 @@ export default function SettingsPage() {
         )}
       </section>
     </div>
-  );
-}
-
-/** Round 3 Availability: an event-wide switch, stored in the database (demo: this browser) and enforced there. */
-function Round3AvailabilityPanel() {
-  const { round3Enabled, loading, error, refresh, setRound3Enabled, settings } = useAppSettings();
-  const { confirm, toast } = useUI();
-  const [saving, setSaving] = useState(false);
-
-  async function change(enabled) {
-    if (saving || loading || enabled === round3Enabled) return;
-    const ok = await confirm({
-      title: enabled ? 'Enable Round 3?' : 'Disable Round 3?',
-      confirmLabel: enabled ? 'Enable Round 3' : 'Disable Round 3',
-      danger: !enabled,
-      message: enabled
-        ? <p>Round 3 — THE KNOWLEDGE AUCTION becomes available again for every organizer: its pages, auction sets, projector and results return with all their existing data.</p>
-        : <p>Round 3 is hidden everywhere on the website and every Round 3 action is refused. Nothing is deleted: auction sets, auctions and results are kept, and enabling Round 3 again restores them. Rounds 1 and 2 are not affected.</p>,
-    });
-    if (!ok) return;
-    setSaving(true);
-    try {
-      await setRound3Enabled(enabled);
-      toast('success', enabled ? 'Round 3 enabled' : 'Round 3 disabled');
-    } catch (e) {
-      toast('error', 'Round 3 Availability was not changed', toQuizError(e).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <section className="panel glass" aria-labelledby="r3a-title">
-      <h2 id="r3a-title"><ToggleLeft size={18} /> Round 3 Availability</h2>
-      <div className="segmented" role="radiogroup" aria-labelledby="r3a-title">
-        {[[false, 'Disabled'], [true, 'Enabled']].map(([value, label]) => (
-          <button key={label} type="button" role="radio" aria-checked={!loading && round3Enabled === value} className={!loading && round3Enabled === value ? 'active' : ''}
-            disabled={loading || saving || !!error} onClick={() => change(value)}>
-            {label}
-          </button>
-        ))}
-      </div>
-      <p className="muted small">
-        {loading ? 'Loading…' : round3Enabled
-          ? 'Round 3 — THE KNOWLEDGE AUCTION is available to organizers.'
-          : 'Round 3 is hidden from the website and its pages, projector and actions are blocked. Its data is kept.'}
-        {!loading && settings.updated_at && <> Last changed {formatStamp(settings.updated_at)}.</>}
-      </p>
-      {error && (
-        <div className="inline-alert alert-warn" role="alert">
-          Could not load Round 3 Availability (Round 3 stays hidden): {error.message} <button className="btn btn-sm btn-ghost" onClick={refresh}>Retry</button>
-        </div>
-      )}
-    </section>
   );
 }

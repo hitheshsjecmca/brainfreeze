@@ -4,10 +4,10 @@ import { SECTION_LABELS } from '../lib/constants.js';
 import { filterTeams } from '../lib/teamSelection.js';
 
 /**
- * Organiser team selection for a round (Round 1 sets, Round 2 games, Round 3 auctions): a searchable list of
+ * Organiser team selection for a round (Round 1 sets, Round 2 games): a searchable list of
  * registered teams with checkboxes, an optional UG / PG filter, Select all (the teams shown), Clear, and a count.
- * Any number of teams; the value is an ordered list of team ids without duplicates (the pick order is kept — Round 3
- * uses it for seats). `locked(team)` → a reason string keeps a selected team checked (e.g. it has already started);
+ * Any number of teams; the value is an ordered list of team ids without duplicates (the pick order is kept).
+ * `locked(team)` → a reason string keeps a selected team checked (e.g. it has already started);
  * `unavailable(team)` → a reason string makes an unselected team unpickable (e.g. it plays in another set).
  * `extra(team)` renders badges after the team name.
  */

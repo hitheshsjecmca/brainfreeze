@@ -106,15 +106,3 @@ export function auditCSV(events) {
   );
 }
 
-/** Round 3 auction summary (organizer only): one row per team, final rank first. */
-export function round3CSV(results) {
-  const byTeam = new Map(results.summary.map((x) => [x.team_id, x]));
-  const s = results.session;
-  return toCSV(
-    ['auction', 'section', 'status', 'rank', 'tied', 'team_number', 'team_name', 'final_score', 'final_budget', 'answered_correctly', 'answered_wrong', 'passes_or_timeouts', 'points_awarded', 'budget_deducted'],
-    results.ranking.map((r) => {
-      const x = byTeam.get(r.team_id) || {};
-      return [s.title, s.section, s.status, r.rank, r.tied ? 'yes' : 'no', r.team_number, r.team_name, r.score, r.budget, x.correct ?? 0, x.wrong ?? 0, x.passes ?? 0, x.points_awarded ?? 0, x.budget_deducted ?? 0];
-    }),
-  );
-}

@@ -74,7 +74,7 @@
 .timer-text strong { font-family: var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
 .timer-text small { color: var(--muted); letter-spacing: .2em; font-weight: 700; }
 .timer-sm { width: 64px; height: 64px; } .timer-sm strong { font-size: .8rem; } .timer-sm small { font-size: .45rem; }
-.timer-md { width: 120px; height: 120px; } .timer-md strong { font-size: 1.3rem; } .timer-md small { font-size: .6rem; }
+.timer-md { width: 96px; height: 96px; } .timer-md strong { font-size: 1.9rem; } .timer-md small { font-size: .6rem; }
 .timer-lg { width: 150px; height: 150px; } .timer-lg strong { font-size: 1.7rem; } .timer-lg small { font-size: .65rem; }
 .timer-proj { width: clamp(110px, 12vw, 190px); height: clamp(110px, 12vw, 190px); } .timer-proj strong { font-size: clamp(1.4rem, 2.6vw, 2.6rem); } .timer-proj small { font-size: clamp(.55rem, .8vw, .8rem); }
 .timer-urgent .timer-arc { stroke: var(--amber); filter: drop-shadow(0 0 8px rgba(251, 191, 36, .8)); }
