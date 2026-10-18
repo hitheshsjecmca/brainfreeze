@@ -1,0 +1,18 @@
+node_modules/
+dist/
+dist-demo/
+.vercel/
+.env
+.env.*
+!.env.example
+!.env.demo
+*.local
+*.log
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+coverage/
+# Backups contain answer keys and scores — never commit them.
+brainfreze-backup-*.json
+supabase/.temp/
