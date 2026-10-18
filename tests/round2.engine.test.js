@@ -5,7 +5,7 @@ import { applyAction, createEmptyState } from '../src/lib/engine.js';
 import {
   applyRound2, normalizeRound2, round2EligibleTeams, round2Lookup, round2Overview, round2SessionBoard, round2SetDetail,
 } from '../src/lib/round2Engine.js';
-import { R2_DEFAULTS, R2_UI_IDLE, canConfirm, formatScore, publishIssues, r2Remaining, r2UiReducer, scoreDelta, validateR2SetFields } from '../src/lib/round2.js';
+import { R2_DEFAULTS, R2_UI_IDLE, canConfirm, canReview, formatScore, publishIssues, r2Remaining, r2UiReducer, scoreDelta, validateR2SetFields } from '../src/lib/round2.js';
 
 const T0 = Date.parse('2026-10-20T10:00:00Z');
 let n = 0;
@@ -194,7 +194,7 @@ describe('live gameplay (tile → reveal → answer → team → score)', () => 
     expect(r2(s, 'r2sScore', { request_id: req, session_id: sid, question_id: q, team_id: team(2), result: 'wrong' }).result.duplicate_request).toBe(true);
     expect(code(() => r2(s, 'r2sScore', { request_id: rid(), session_id: sid, question_id: q, team_id: team(1), result: 'right' }))).toBe('TRIVIA_QUESTION_USED');
     expect(code(() => r2(s, 'r2sSelect', { session_id: sid, question_id: q }))).toBe('TRIVIA_QUESTION_USED');
-    expect(scoresOf(s, sid)).toEqual({ 1: 0, 2: -7.75 }); // 50 % of 15.5
+    expect(scoresOf(s, sid)).toEqual({ 1: 0, 2: 0 }); // a wrong answer scores 0 — nothing is deducted
     // the state comes back the same on a reload
     expect(board(s, sid, true)).toEqual(board(structuredClone(s), sid, true));
   });
@@ -234,33 +234,58 @@ describe('live gameplay (tile → reveal → answer → team → score)', () => 
 });
 
 describe('host confirmation flow (local, before any server call)', () => {
-  it('Right and Wrong open the team-selection step; no team is preselected', () => {
+  it('Right and Wrong open the "Which Team Answered?" step; no team is preselected', () => {
     for (const result of ['right', 'wrong']) {
       const ui = r2UiReducer(R2_UI_IDLE, { type: 'mark', result });
-      expect(ui).toEqual({ modal: 'team', result, teamId: null });
+      expect(ui).toEqual({ modal: 'team', result, teamId: null, error: null });
+      expect(canReview(ui)).toBe(false);
       expect(canConfirm(ui)).toBe(false);
     }
     expect(r2UiReducer(R2_UI_IDLE, { type: 'mark', result: 'maybe' })).toBe(R2_UI_IDLE);
   });
 
-  it('Confirm needs exactly one team; Cancel discards the selection', () => {
+  it('Confirm is enabled only once exactly one team is chosen; the summary step comes before Confirm Score', () => {
     let ui = r2UiReducer(R2_UI_IDLE, { type: 'mark', result: 'right' });
+    expect(r2UiReducer(ui, { type: 'review' })).toBe(ui); // no team yet → stays on the team step
     ui = r2UiReducer(ui, { type: 'pick', teamId: 't1' });
     ui = r2UiReducer(ui, { type: 'pick', teamId: 't2' });
     expect(ui.teamId).toBe('t2');
+    expect(canReview(ui)).toBe(true);
+    expect(canConfirm(ui)).toBe(false); // Confirm Score only on the summary
+    ui = r2UiReducer(ui, { type: 'review' });
+    expect(ui).toMatchObject({ modal: 'confirm', result: 'right', teamId: 't2' });
     expect(canConfirm(ui)).toBe(true);
-    expect(r2UiReducer(ui, { type: 'cancel' })).toEqual(R2_UI_IDLE);
+    expect(r2UiReducer(ui, { type: 'pick', teamId: 't1' })).toBe(ui); // the team is fixed on the summary
+    const back = r2UiReducer(ui, { type: 'back' });
+    expect(back).toMatchObject({ modal: 'team', teamId: 't2' }); // Back keeps the chosen team
     expect(r2UiReducer(R2_UI_IDLE, { type: 'pick', teamId: 't1' })).toBe(R2_UI_IDLE);
+  });
+
+  it('Cancel on either step discards everything; nothing is sent to the server', () => {
+    const team = r2UiReducer(r2UiReducer(R2_UI_IDLE, { type: 'mark', result: 'wrong' }), { type: 'pick', teamId: 't1' });
+    expect(r2UiReducer(team, { type: 'cancel' })).toEqual(R2_UI_IDLE);
+    expect(r2UiReducer(r2UiReducer(team, { type: 'review' }), { type: 'cancel' })).toEqual(R2_UI_IDLE);
+  });
+
+  it('a failed save keeps the summary, the team and the result with the error, so Confirm Score can be retried', () => {
+    const summary = r2UiReducer(r2UiReducer(r2UiReducer(R2_UI_IDLE, { type: 'mark', result: 'right' }), { type: 'pick', teamId: 't3' }), { type: 'review' });
+    const failed = r2UiReducer(summary, { type: 'failed', error: 'Network error' });
+    expect(failed).toEqual({ modal: 'confirm', result: 'right', teamId: 't3', error: 'Network error' });
+    expect(canConfirm(failed)).toBe(true);
+    expect(r2UiReducer(failed, { type: 'done' })).toEqual(R2_UI_IDLE); // a successful retry closes every dialog
+    expect(r2UiReducer(R2_UI_IDLE, { type: 'failed', error: 'x' })).toBe(R2_UI_IDLE);
   });
 });
 
 describe('rules and data safety', () => {
-  it('scoring rule: right = +value; wrong = −penalty % (default 50 %, documented); fractions kept', () => {
-    expect(scoreDelta(20, 'right')).toBe(20);
-    expect(scoreDelta(20, 'wrong')).toBe(-10);
-    expect(scoreDelta(15.5, 'wrong', 50)).toBe(-7.75);
-    expect(scoreDelta(20, 'wrong', 0)).toBe(0);
+  it('scoring rule: right = +the question’s points; wrong and no result = 0 (never deducted); fractions kept', () => {
+    for (const pts of [10, 20, 30, 15.5]) {
+      expect(scoreDelta(pts, 'right')).toBe(pts);
+      expect(Object.is(scoreDelta(pts, 'wrong'), 0)).toBe(true);
+    }
     expect(scoreDelta(20, 'no_score')).toBe(0);
+    expect(formatScore(scoreDelta(20, 'right'), { sign: true })).toBe('+20'); // shown as the expected score change
+    expect(formatScore(scoreDelta(30, 'wrong'), { sign: true })).toBe('0');
     expect(formatScore(-7.75)).toBe('−7.75');
     expect(validateR2SetFields({ title: 'x', timer_seconds: '4' }).errors.timer_seconds).toMatch(/5–120/);
     expect(validateR2SetFields({ title: '', section: 'MBA' }).errors).toMatchObject({ title: expect.any(String), section: expect.any(String) });
@@ -346,7 +371,7 @@ describe('private organiser view and interactive projector', () => {
     p = pub(s, sid);
     expect(p.game.phase).toBe('idle');
     expect(tile(p, 'Databases', 15.5).used).toBe(true);
-    expect(scoresOf(s, sid)).toEqual({ 1: 0, 2: -7.75 });
+    expect(scoresOf(s, sid)).toEqual({ 1: 0, 2: 0 });
   });
 
   it('protected scoring: only a revealed question of this session, only a session team, never twice — refresh changes nothing', () => {

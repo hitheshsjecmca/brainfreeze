@@ -7,15 +7,12 @@ export const R2_DEFAULTS = Object.freeze({ timer_seconds: 18, wrong_penalty_perc
 export const R2_LIMITS = Object.freeze({ minTimer: 5, maxTimer: 120, maxPoints: 10000, topicName: 60, question: 1000, answer: 500 });
 export const R2_RESULT_LABELS = { right: 'Right', wrong: 'Wrong', no_score: 'Closed — no points' };
 
-/** Score change for a result (mirrors public._r2_delta): right = +value, wrong = −value × penalty %, else 0. */
-export function scoreDelta(points, result, penaltyPercent = R2_DEFAULTS.wrong_penalty_percent) {
-  const p = Number(points);
-  if (result === 'right') return round2dp(p);
-  if (result === 'wrong') {
-    const v = -round2dp((p * Number(penaltyPercent)) / 100);
-    return v === 0 ? 0 : v; // never −0
-  }
-  return 0;
+/**
+ * Score change for a result (mirrors public._r2_delta, migration 16): right = +the question's saved value;
+ * wrong (and closing without a result) = 0 — nothing is ever deducted. Display only: the database scores.
+ */
+export function scoreDelta(points, result) {
+  return result === 'right' ? round2dp(Number(points)) : 0;
 }
 
 const clean = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -122,19 +119,27 @@ export function formatScore(n, { sign = false } = {}) {
 }
 
 /**
- * The host's local confirmation flow (no server state until Confirm Score):
- *   { modal: null } —mark(right|wrong)→ { modal: 'team', result, teamId: null }
- *   —pick(teamId)→ teamId set —cancel→ { modal: null }.
- * `canConfirm` is true only with a result AND exactly one chosen team.
+ * The organiser's local scoring flow (no server state until Confirm Score):
+ *   { modal: null } —mark(right|wrong)→ { modal: 'team', result, teamId: null }   "Which Team Answered?"
+ *   —pick(teamId)→ teamId set —review→ { modal: 'confirm' }                         summary + Confirm Score
+ *   —back→ { modal: 'team' } (team kept) · —failed(error)→ stays on 'confirm' with the error, for a retry
+ *   —cancel / done→ idle.
+ * `canReview`: a result and exactly one chosen team. `canConfirm`: the same, on the summary step.
  */
-export const R2_UI_IDLE = Object.freeze({ modal: null, result: null, teamId: null });
+export const R2_UI_IDLE = Object.freeze({ modal: null, result: null, teamId: null, error: null });
 export function r2UiReducer(state, event) {
   switch (event.type) {
     case 'mark':
       if (!['right', 'wrong'].includes(event.result)) return state;
-      return { modal: 'team', result: event.result, teamId: null };
+      return { modal: 'team', result: event.result, teamId: null, error: null };
     case 'pick':
-      return state.modal === 'team' ? { ...state, teamId: event.teamId } : state;
+      return state.modal === 'team' ? { ...state, teamId: event.teamId, error: null } : state;
+    case 'review':
+      return state.modal === 'team' && state.teamId ? { ...state, modal: 'confirm', error: null } : state;
+    case 'back':
+      return state.modal === 'confirm' ? { ...state, modal: 'team', error: null } : state;
+    case 'failed':
+      return state.modal === 'confirm' ? { ...state, error: String(event.error || 'The score was not saved.') } : state;
     case 'cancel':
     case 'done':
       return R2_UI_IDLE;
@@ -142,4 +147,5 @@ export function r2UiReducer(state, event) {
       return state;
   }
 }
-export const canConfirm = (ui) => ui.modal === 'team' && !!ui.result && !!ui.teamId;
+export const canReview = (ui) => ui.modal === 'team' && !!ui.result && !!ui.teamId;
+export const canConfirm = (ui) => ui.modal === 'confirm' && !!ui.result && !!ui.teamId;

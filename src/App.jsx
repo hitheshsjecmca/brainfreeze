@@ -5,6 +5,7 @@ import { QuizProvider } from './context/QuizContext.jsx';
 import { UIProvider } from './context/UIContext.jsx';
 import { Loading } from './components/Common.jsx';
 import HostLayout from './components/HostLayout.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { LEGACY_ROUTES } from './lib/rounds.js';
 import Landing from './pages/Landing.jsx';
 import Login from './pages/Login.jsx';
@@ -54,6 +55,12 @@ function RequireRegistrar({ children }) {
   return children;
 }
 
+/** A rendering error shows a message (with Reload) instead of a blank screen; navigating away clears it. */
+function PageBoundary({ children }) {
+  const { pathname } = useLocation();
+  return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>;
+}
+
 export default function App() {
   // Fail safe: a build without valid Supabase configuration never runs as an open demo.
   if (configProblem) return <ConfigError problem={configProblem} />;
@@ -62,6 +69,7 @@ export default function App() {
       <UIProvider>
         <AuthProvider>
           <Suspense fallback={<Loading />}>
+            <PageBoundary>
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/login" element={<Login />} />
@@ -106,6 +114,7 @@ export default function App() {
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            </PageBoundary>
           </Suspense>
         </AuthProvider>
       </UIProvider>

@@ -138,7 +138,7 @@ describe('protected scoring', () => {
     // Fresh reads of both views (a refresh) keep the tile used and the score counted once.
     expect(tile(await projector(sid), 'Space', 20).used).toBe(true);
     const h = await host(sid);
-    expect(h.scores.map((s) => [s.team_number, Number(s.score)])).toEqual([[1, 10], [2, -10]]);
+    expect(h.scores.map((s) => [s.team_number, Number(s.score)])).toEqual([[1, 10], [2, 0]]); // the wrong answer scored 0
     expect(h.results).toHaveLength(2);
     expect(h.game.phase).toBe('idle');
   });

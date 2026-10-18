@@ -136,7 +136,7 @@ export default function Round2Join() {
             <dt>Trivia set</dt><dd>{set.title} (version {set.version}, code {formatJoinCode(set.join_code)})</dd>
             <dt>Section</dt><dd>{SECTION_LABELS[section]}</dd>
             <dt>Teams</dt><dd>{chosen.length ? <><b>{chosen.length}</b>: {selectionNames(picked, teams)}</> : <span className="warn-text">Select at least one team.</span>}</dd>
-            <dt>Rules</dt><dd>{set.timer_seconds}-second question timer · Right +value · Wrong −{formatScore(set.wrong_penalty_percent)} % of the value</dd>
+            <dt>Rules</dt><dd>{set.timer_seconds}-second question timer · Right + the question&rsquo;s points · Wrong 0</dd>
           </dl>
           <p className="muted small">The game starts only when you press Start Round 2. Other Round 2 games — even of this set — are not affected.</p>
           {problem && chosen.length > 0 && <p className="danger-text small" role="alert">{problem}</p>}

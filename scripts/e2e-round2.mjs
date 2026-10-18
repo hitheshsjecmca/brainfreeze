@@ -2,9 +2,11 @@
 // Trivia Sets: create sets, topics and questions, edit the draft, preview, publish → six-digit code.
 // Join Round 2: code → set → section → registered teams → review → Start Round 2 (projector opens).
 // Game: tile → hidden; Reveal → question + 18 s timer; Answer → answer only; Right/Wrong →
-// "Which team answered?" → Confirm Score; cancel/double-click/expiry never mis-score; a second
-// game of the same set is independent. The projector is interactive for the organiser (tile →
-// Reveal / Cancel → Right / Wrong / Answer → team popup → Confirm Score), stays in step with the host
+// "Which Team Answered?" → Confirm → summary (question, team, result, points, change) → Confirm Score.
+// Right = +the question's points, Wrong = 0; cancel/double-click/expiry never mis-score; a failed save shows
+// an error, keeps the question open and can be retried; a second game of the same set is independent.
+// The projector is interactive for the organiser (tile → Reveal / Cancel → Right / Wrong / Answer → team
+// popup → Confirm → Confirm Score), stays in step with the host
 // screen, and never shows scores, rankings or the score log — those are on the private host screen only.
 //   npm run build:demo && npm run preview:demo     (serves http://localhost:4173)
 //   node scripts/e2e-round2.mjs [baseUrl] [screenshotDir]
@@ -106,14 +108,15 @@ await host.getByRole('button', { name: 'Load trivia set' }).click();
 await host.getByRole('heading', { name: /^UG Final Board/ }).waitFor();
 check(await host.locator('.r2-board .r2-tile').count() === 3, 'the code loads the published set');
 check(await host.getByRole('radio', { name: /^PG/ }).isDisabled(), 'a UG-only set cannot be played by the PG section');
-await host.getByRole('list', { name: 'Registered UG teams' }).waitFor();
-const teamCount = await host.locator('.r2-roster li').count();
+await host.locator('.team-picker-list li').first().waitFor();
+const teamCount = await host.locator('.team-picker-list li').count();
 check(teamCount >= 3, `registered UG teams are listed (${teamCount})`);
 check(await host.getByRole('button', { name: /Start Round 2/ }).isDisabled(), 'Start is disabled until a team is selected');
-for (const n of [1, 2, 3]) await host.locator('.r2-roster li', { hasText: new RegExp(`^T${n} `) }).first().locator('input').check();
+for (const n of [1, 2, 3]) await host.locator('.team-picker-list li', { hasText: `T${n} ` }).first().locator('input').check();
 check(/T1 .*T2 .*T3 /.test(await host.locator('.r2-review').innerText()), 'the review lists the set, section and the three teams');
 await host.screenshot({ path: join(SHOTS, 'r2-01-join.png') });
-const [proj] = await Promise.all([ctx.waitForEvent('page'), host.getByRole('button', { name: /Start Round 2/ }).click()]);
+await host.getByRole('button', { name: /Review & Start Round 2/ }).click();
+const [proj] = await Promise.all([ctx.waitForEvent('page'), host.getByRole('alertdialog').getByRole('button', { name: 'Start Round 2' }).click()]);
 watch(proj, 'projector');
 await host.getByRole('heading', { name: 'Trivia board' }).waitFor();
 check(/\/host\/rounds\/2\/session\//.test(host.url()), 'Start Round 2 opens the live game');
@@ -149,30 +152,48 @@ await host.getByRole('button', { name: 'Answer', exact: true }).click();
 await proj.locator('.r2-ov-answer', { hasText: '443' }).waitFor();
 check(await scoreOf(host, 1) === '0' && await scoreOf(host, 2) === '0', 'Answer shows the answer without changing scores');
 
-// --- Right → team modal → Cancel → nothing changes
+// --- Right → "Which Team Answered?" → Cancel → nothing changes (also from the summary step)
 await host.getByRole('button', { name: 'Right', exact: true }).click();
-await dialog().getByRole('heading', { name: 'Which team answered this question?' }).waitFor();
-check(await dialog().getByRole('button', { name: 'Confirm Score' }).isDisabled(), 'Right opens the team modal; Confirm disabled until a team is chosen');
+await dialog().getByRole('heading', { name: 'Which Team Answered?' }).waitFor();
+check(await dialog().getByRole('button', { name: 'Confirm', exact: true }).isDisabled(), 'Right opens "Which Team Answered?"; Confirm disabled until a team is chosen');
 check(await dialog().locator('input[type=radio]:checked').count() === 0 && await dialog().locator('.r2-team-opt').count() === 3, 'only the three selected teams are offered; none preselected');
 await dialog().getByRole('button', { name: 'Cancel' }).click();
 await dialog().waitFor({ state: 'detached' });
 check(await scoreOf(host, 1) === '0' && await host.getByRole('button', { name: 'Right', exact: true }).count() === 1, 'Cancel changes no score and keeps the question open');
-
-// --- Wrong → team 1 → Confirm (double-clicked) → −10 once
-await host.getByRole('button', { name: 'Wrong', exact: true }).click();
-await dialog().getByRole('heading', { name: 'Which team answered this question?' }).waitFor();
+await host.getByRole('button', { name: 'Right', exact: true }).click();
 await dialog().locator('.r2-team-opt').first().click();
-check(/−10/.test(await dialog().innerText()), 'modal shows the value, the result and the −10 change');
+await dialog().getByRole('button', { name: 'Confirm', exact: true }).click();
+await dialog().getByRole('heading', { name: 'Confirm score' }).waitFor();
+await dialog().getByRole('button', { name: 'Cancel' }).click();
+await dialog().waitFor({ state: 'detached' });
+check(await scoreOf(host, 1) === '0' && await host.getByRole('button', { name: 'Right', exact: true }).count() === 1, 'Cancel on the summary changes no score and keeps the question open');
+
+// --- Right → team 1 → Confirm → summary (+20) → a failed save shows an error and keeps everything → retry (double-clicked) → +20 once
+await host.getByRole('button', { name: 'Right', exact: true }).click();
+await dialog().getByRole('heading', { name: 'Which Team Answered?' }).waitFor();
+await dialog().locator('.r2-team-opt').first().click();
+await dialog().getByRole('button', { name: 'Confirm', exact: true }).click();
+await dialog().getByRole('heading', { name: 'Confirm score' }).waitFor();
+const summary = await dialog().innerText();
+check(/Which port does HTTPS use by default\?/.test(summary) && /UG T1/.test(summary) && /Right/.test(summary) && /Question points\s*20/.test(summary) && /\+20 points/.test(summary),
+  'the summary shows the question, the team, Right, the question’s 20 points and the +20 change');
+check(await scoreOf(host, 1) === '0', 'no score changes before Confirm Score');
+// one simulated storage failure for the next write (the demo backend saves through IndexedDB)
+await host.evaluate(() => { const orig = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function put() { IDBObjectStore.prototype.put = orig; throw new DOMException('Simulated save failure', 'QuotaExceededError'); }; });
+await dialog().getByRole('button', { name: 'Confirm Score' }).click();
+await dialog().getByRole('alert').filter({ hasText: 'The score was not saved' }).waitFor();
+check(await dialog().getByRole('heading', { name: 'Confirm score' }).count() === 1 && await host.locator('.r2-control-foot').count() === 1 && await scoreOf(host, 1) === '0',
+  'a failed save shows an error, keeps the summary and the open question, and changes no score');
 await dialog().getByRole('button', { name: 'Confirm Score' }).dblclick();
 await dialog().waitFor({ state: 'detached' });
 await host.locator('.r2-last').waitFor();
-check(await scoreOf(host, 1) === '−10', 'Wrong deducts half the value (−10) for the confirmed team');
-check(await tile('Networks', 20).isDisabled(), 'played tile is disabled');
+check(await scoreOf(host, 1) === '20', 'the retry (double-clicked) adds the question’s 20 points once');
+check(await tile('Networks', 20).isDisabled() && await host.getByRole('heading', { name: 'Trivia board' }).count() === 1, 'back on the trivia board; the played tile is disabled');
 await proj.locator('.r2-tile-used').first().waitFor();
-check(await proj.locator('.r2-overlay').count() === 0 && await projPrivate() && await proj.getByText('−10').count() === 0, 'projector returns to the board with the tile used — the score change stays private');
+check(await proj.locator('.r2-overlay').count() === 0 && await projPrivate(), 'projector returns to the board with the tile used — no scores');
 await host.reload();
 await host.locator('.r2-board').waitFor();
-check(await tile('Networks', 20).isDisabled() && await scoreOf(host, 1) === '−10', 'after a reload the question stays played and the score persists');
+check(await tile('Networks', 20).isDisabled() && await scoreOf(host, 1) === '20', 'after a reload the question stays played and the score persists');
 
 // --- played entirely ON THE PROJECTOR: tile → Cancel; tile → Reveal → Answer → Right → team 2 → Confirm (+10)
 const pdialog = () => proj.getByRole('dialog');
@@ -199,11 +220,14 @@ await proj.locator('.r2-ov-answer', { hasText: 'Domain Name System' }).waitFor()
 await host.locator('.r2-answer', { hasText: 'Domain Name System' }).waitFor();
 check(await scoreOf(host, 2) === '0', 'Answer on the projector shows the answer on both screens, no score change');
 await proj.getByRole('button', { name: 'Right', exact: true }).click();
-await pdialog().getByRole('heading', { name: 'Which team answered this question?' }).waitFor();
+await pdialog().getByRole('heading', { name: 'Which Team Answered?' }).waitFor();
 const popup = await pdialog().innerText();
-check(await pdialog().locator('.r2-team-opt').count() === 3 && !/pts|−10|\+10/.test(popup), 'the projector team popup lists the three teams without any scores');
-check(await pdialog().getByRole('button', { name: 'Confirm Score' }).isDisabled(), 'Confirm Score needs a team on the projector too');
+check(await pdialog().locator('.r2-team-opt').count() === 3 && !/pts|−\d|\+\d/.test(popup), 'the projector team popup lists the three teams without any scores');
+check(await pdialog().getByRole('button', { name: 'Confirm', exact: true }).isDisabled(), 'Confirm needs a team on the projector too');
 await pdialog().locator('.r2-team-opt', { hasText: 'T2' }).click();
+await pdialog().getByRole('button', { name: 'Confirm', exact: true }).click();
+const psum = await pdialog().innerText();
+check(/\+10 points/.test(psum) && !/\(now/.test(psum), 'the projector summary shows the +10 change but no team total');
 await pdialog().getByRole('button', { name: 'Confirm Score' }).dblclick();
 await pdialog().waitFor({ state: 'detached' });
 await proj.locator('.r2-overlay').waitFor({ state: 'detached' });
@@ -246,14 +270,28 @@ const firstGame = host.url();
 await tab('Join Round 2');
 await host.getByLabel('Six-digit trivia set code').fill(code);
 await host.getByRole('button', { name: 'Load trivia set' }).click();
-await host.getByRole('list', { name: 'Registered UG teams' }).waitFor();
-await host.locator('.r2-roster li', { hasText: /^T3 / }).first().locator('input').check();
-await host.getByRole('button', { name: /Start Round 2/ }).click();
+await host.locator('.team-picker-list li').first().waitFor();
+await host.locator('.team-picker-list li', { hasText: 'T3 ' }).first().locator('input').check();
+await host.getByRole('button', { name: /Review & Start Round 2/ }).click();
+await host.getByRole('alertdialog').getByRole('button', { name: 'Start Round 2' }).click();
 await host.getByRole('heading', { name: 'Trivia board' }).waitFor();
 check(host.url() !== firstGame && await host.locator('.r2-tile-used').count() === 0 && await scoreOf(host, 3) === '0', 'the second game starts with a fresh board and scores');
+// Wrong → team 3 → summary (+0) → Confirm Score → 0 points, tile used, back on the board
+await tile('Networks', 20).click();
+await dialog().getByRole('button', { name: 'Reveal Question' }).click();
+await host.getByRole('button', { name: 'Wrong', exact: true }).click();
+await dialog().getByRole('heading', { name: 'Which Team Answered?' }).waitFor();
+await dialog().locator('.r2-team-opt').first().click();
+await dialog().getByRole('button', { name: 'Confirm', exact: true }).click();
+const wsum = await dialog().innerText();
+check(/Wrong/.test(wsum) && /Score change\s*0 points/.test(wsum) && !/−/.test(wsum), 'Wrong: the summary shows a 0-point change — nothing is deducted');
+await dialog().getByRole('button', { name: 'Confirm Score' }).click();
+await dialog().waitFor({ state: 'detached' });
+await host.locator('.r2-last', { hasText: 'Wrong' }).waitFor();
+check(await scoreOf(host, 3) === '0' && await tile('Networks', 20).isDisabled(), 'Wrong scores 0 for the confirmed team; the tile is used and the board is back');
 await host.goto(firstGame);
 await host.locator('.r2-board').waitFor();
-check(await host.locator('.r2-tile-used').count() === 3 && await scoreOf(host, 1) === '−10', 'the first game is unchanged');
+check(await host.locator('.r2-tile-used').count() === 3 && await scoreOf(host, 1) === '20', 'the first game is unchanged');
 await tab('Round 2 Dashboard');
 await host.locator('tbody tr').nth(1).waitFor({ timeout: 5000 }).catch(() => {});
 check(await host.locator('tbody tr').count() === 2, 'the dashboard lists both live games');

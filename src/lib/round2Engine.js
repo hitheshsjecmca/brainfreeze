@@ -280,7 +280,7 @@ const ACTIONS = {
     if (!team) fail('TRIVIA_TEAM_NOT_IN_ROUND', 'That team is not playing in this Round 2 session.');
     const v = versionOf(r, g);
     const q = v.questions.find((x) => x.id === question_id);
-    return record.call(this, r, g, q, { request_id, team, result, points: scoreDelta(q.points, result, v.wrong_penalty_percent) });
+    return record.call(this, r, g, q, { request_id, team, result, points: scoreDelta(q.points, result) });
   },
 
   r2sCloseQuestion(st, r, { request_id, session_id, question_id }) {

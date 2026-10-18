@@ -186,13 +186,13 @@ describe('live gameplay', () => {
     expect(after.results[0]).toMatchObject({ team_number: 1, result: 'right', topic_name: 'Networks', answer_revealed: true });
   });
 
-  it('Wrong deducts the configured penalty (50 % by default); nothing is scored before Reveal', async () => {
+  it('Wrong scores 0 (nothing deducted, migration 16); nothing is scored before Reveal', async () => {
     const q = tile(await org('r2s_board', [s1, false]), 'Databases', 25.5);
     expect(await errCode(org('r2s_score', [rid(), s1, q.id, ug2, 'wrong']))).toBe('TRIVIA_NOT_REVEALED');
     await org('r2s_select', [s1, q.id]);
     expect(await errCode(org('r2s_score', [rid(), s1, q.id, ug2, 'wrong']))).toBe('TRIVIA_NOT_REVEALED');
     await org('r2s_reveal_question', [s1, q.id]);
-    expect(Number((await org('r2s_score', [rid(), s1, q.id, ug2, 'wrong'])).points)).toBe(-12.75);
+    expect(Number((await org('r2s_score', [rid(), s1, q.id, ug2, 'wrong'])).points)).toBe(0);
   });
 
   it('an expired timer scores nothing; the host can close a question without points', async () => {
@@ -202,7 +202,7 @@ describe('live gameplay', () => {
     await db.query(`update public.r2_sessions set revealed_at = now() - interval '5 minutes' where id = $1`, [s1]);
     const b = await org('r2s_board', [s1, true]);
     expect(b.game.phase).toBe('revealed');
-    expect(b.scores.map((s) => Number(s.score)).sort()).toEqual([-12.75, 10]);
+    expect(b.scores.map((s) => Number(s.score)).sort()).toEqual([0, 10]);
     expect(await org('r2s_close_question', [rid(), s1, q.id])).toMatchObject({ result: 'no_score' });
     expect(tile(await org('r2s_board', [s1, false]), 'AI & ML', 50).used).toBe(true);
   });

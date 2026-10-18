@@ -135,7 +135,7 @@ export default function Round2Session() {
               </div>
               <R2QuestionActions game={game} play={play} />
               <div className="row gap wrap r2-control-foot">
-                <span className="muted small">Right: +{formatScore(game.points)} · Wrong: {formatScore(scoreDelta(game.points, 'wrong', settings.wrong_penalty_percent))} (after you confirm the team)</span>
+                <span className="muted small">Right: +{formatScore(scoreDelta(game.points, 'right'))} · Wrong: +{formatScore(scoreDelta(game.points, 'wrong'))} (after you confirm the team)</span>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={play.closeWithoutPoints} disabled={play.busy('r2-close')}><X size={14} /> Close without points</button>
               </div>
             </section>

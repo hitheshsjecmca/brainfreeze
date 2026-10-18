@@ -99,15 +99,16 @@ describe('scoring (server-side, atomic, once)', () => {
       values ('${rid()}', '${Q.n10}', 'x', 'x', 'right', 10, 10)`))).toMatch(/duplicate key|unique/i);
   });
 
-  it('Wrong deducts the configured penalty (half by default; configurable; 2-decimal values)', async () => {
+  it('Wrong scores 0 whatever the stored penalty setting (migration 16: nothing is deducted)', async () => {
+    const before = (await scores())[1];
     await open(Q.n20);
     await org('r2_score_question', [rid(), Q.n20, await teamId(1), 'wrong']);
-    expect((await scores())[1]).toBe(-10);
+    expect((await scores())[1]).toBe(before);
     await org('r2_update_settings', [{ wrong_penalty_percent: '25' }]);
     await open(Q.d15);
     const r = await org('r2_score_question', [rid(), Q.d15, await teamId(1), 'wrong']);
-    expect(Number(r.points)).toBe(-3.75);
-    expect((await scores())[1]).toBe(-13.75);
+    expect(Number(r.points)).toBe(0);
+    expect((await scores())[1]).toBe(before);
     await org('r2_update_settings', [{ wrong_penalty_percent: '50' }]);
   });
 

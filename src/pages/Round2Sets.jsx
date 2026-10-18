@@ -9,7 +9,7 @@ import { TriviaBoard } from '../components/Round2Bits.jsx';
 import { formatJoinCode } from '../lib/joinCodes.js';
 import { formatStamp } from '../lib/sets.js';
 import {
-  R2_DEFAULTS, R2_SECTIONS, R2_SECTION_LABELS, boardTopics, formatScore, publishIssues, scoreDelta, validateR2Question, validateR2SetFields, validateTopicName,
+  R2_DEFAULTS, R2_SECTIONS, R2_SECTION_LABELS, boardTopics, formatScore, publishIssues, validateR2Question, validateR2SetFields, validateTopicName,
 } from '../lib/round2.js';
 
 function useCopy() {
@@ -73,17 +73,16 @@ export function TriviaSets() {
   );
 }
 
-/** Title, section compatibility, timer and wrong-answer penalty (new set or edit). */
+/** Title, section compatibility and timer (new set or edit). */
 function SetForm({ set = null, onClose, onSaved }) {
   const [form, setForm] = useState({
     title: set?.title ?? '', section: set?.section ?? 'BOTH',
-    timer_seconds: String(set?.timer_seconds ?? R2_DEFAULTS.timer_seconds), wrong_penalty_percent: String(set?.wrong_penalty_percent ?? R2_DEFAULTS.wrong_penalty_percent),
+    timer_seconds: String(set?.timer_seconds ?? R2_DEFAULTS.timer_seconds),
   });
   const [touched, setTouched] = useState(false);
   const check = validateR2SetFields(form);
   const err = (k) => (touched ? check.errors[k] : undefined);
   const set_ = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  const example = check.ok ? scoreDelta(20, 'wrong', check.value.wrong_penalty_percent) : null;
   async function submit(e) {
     e.preventDefault();
     setTouched(true);
@@ -101,11 +100,8 @@ function SetForm({ set = null, onClose, onSaved }) {
           <Field label="Question timer (seconds)" error={err('timer_seconds')} hint={`Default ${R2_DEFAULTS.timer_seconds}. Display only — it never scores.`}>
             <input type="number" min={5} max={120} value={form.timer_seconds} onChange={set_('timer_seconds')} />
           </Field>
-          <Field label="Wrong answer penalty (% of the value)" error={err('wrong_penalty_percent')} hint={`Default ${R2_DEFAULTS.wrong_penalty_percent} %.`}>
-            <input type="number" min={0} max={100} step="0.01" value={form.wrong_penalty_percent} onChange={set_('wrong_penalty_percent')} />
-          </Field>
         </div>
-        <p className="muted small">Scoring: Right adds the question&rsquo;s full value; Wrong deducts the penalty{example !== null && <> (a 20-point question: right +20, wrong {formatScore(example)})</>}; closing a question without a result gives 0.</p>
+        <p className="muted small">Scoring: Right adds the question&rsquo;s points to the team that answered (a 20-point question: +20); Wrong and closing a question without a result give 0. Nothing is deducted.</p>
         <div className="modal-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary"><Save size={16} /> {set ? 'Save settings' : 'Create set'}</button>
@@ -182,7 +178,7 @@ export function TriviaSetEditor() {
         <div className="panel-head">
           <div>
             <h2 id="r2-set-title">{s.title} <span className={`badge ${cls}`}>{label}</span></h2>
-            <p className="muted small">{R2_SECTION_LABELS[s.section]} · {s.timer_seconds}-second timer · wrong answer −{formatScore(s.wrong_penalty_percent)} % of the value{s.published_at && <> · last published {formatStamp(s.published_at)}</>}</p>
+            <p className="muted small">{R2_SECTION_LABELS[s.section]} · {s.timer_seconds}-second timer · Right + points, Wrong 0{s.published_at && <> · last published {formatStamp(s.published_at)}</>}</p>
           </div>
           {!archived && (
             <div className="row gap wrap">

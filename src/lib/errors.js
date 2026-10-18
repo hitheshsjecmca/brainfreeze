@@ -97,7 +97,7 @@ const OUTDATED_COUNT_RULE = /30 to 60|at most 60/;
 export const OUTDATED_DATABASE_MESSAGE = 'The database still enforces the old 30–60 question rule. Apply supabase/migrations/20261018000100_round1_simplify_setup.sql to the Supabase project, then publish again.';
 
 // The newest migration always re-applies the complete function permission set (and is safe to re-run).
-export const PERMISSIONS_REPAIR_MIGRATION = '20261025000100_manual_team_selection.sql';
+export const PERMISSIONS_REPAIR_MIGRATION = '20261026000100_round2_wrong_scores_zero.sql';
 
 // Normalize anything thrown by Supabase / fetch / engine into a QuizError.
 export function toQuizError(err) {
