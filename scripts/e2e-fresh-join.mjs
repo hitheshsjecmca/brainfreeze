@@ -168,9 +168,60 @@ await p.reload();
 await p.locator('.play-question').waitFor();
 check(await p.locator('.play-timebar').count() === 1, 'after a refresh the timer and question come back');
 await p.screenshot({ path: join(SHOTS, 'f05-participant-question.png') });
-await p.getByRole('button', { name: 'Submit Quiz' }).click();
+
+// --- Submit Quiz only on the final question; navigating never submits
+const palette = p.locator('.play-palette button');
+const total = await palette.count();
+const submitBtn = () => p.getByRole('button', { name: 'Submit Quiz' });
+const nextBtn = () => p.locator('.play-nav-row').getByRole('button', { name: /^Next/ });
+const showing = (n) => p.locator(`.play-palette button[aria-current="step"]`, { hasText: new RegExp(`^${n}$`) }).waitFor();
+await palette.nth(0).click(); await showing(1);
+check(await submitBtn().count() === 0 && await nextBtn().count() === 1, 'question 1: Next shown, Submit Quiz hidden');
+await nextBtn().click(); await showing(2);
+check(await submitBtn().count() === 0, 'question 2 (via Next): Submit Quiz hidden');
+await palette.nth(total - 1).click(); await showing(total);
+check(await submitBtn().count() === 1 && await nextBtn().count() === 0, `question ${total} (numbered jump): Submit Quiz shown, Next hidden`);
+await p.waitForTimeout(2500); // a few polls on the last question
+check(await p.locator('.play-question').count() === 1 && await p.locator('.play-finished').count() === 0, 'opening the last question does not submit');
+await palette.nth(1).click(); await showing(2);
+check(await submitBtn().count() === 0, 'jumping back to an earlier question hides Submit Quiz again');
+await palette.nth(total - 1).click(); await showing(total);
+
+// --- confirmation shows the unanswered count; cancel keeps answering; confirm shows the thank-you screen
+await submitBtn().click();
+const confirm = p.getByRole('dialog');
+await confirm.waitFor();
+check(new RegExp(`${total - 1} questions are still unanswered`).test(await confirm.innerText()), `confirmation says ${total - 1} questions are unanswered`);
+await confirm.getByRole('button', { name: /Cancel/ }).click();
+check(await p.locator('.play-question').count() === 1, 'cancelling keeps the quiz open');
+await submitBtn().click();
 await p.getByRole('button', { name: 'Submit now' }).click();
-await p.getByText('Quiz submitted').waitFor();
+await p.getByRole('heading', { name: 'Thank You for Your Participation!' }).waitFor();
+const thanks = await p.locator('.play-finished').innerText();
+check(/submitted successfully\. Thank you for participating in BRAINFREZE!/.test(thanks) && /wait for further instructions from the organizers/.test(thanks),
+  'manual submit shows the thank-you message');
+check(!/main screen|score|rank|correct/i.test(thanks), 'thank-you screen shows no results and no "watch the main screen"');
+await p.screenshot({ path: join(SHOTS, 'f05b-thank-you.png') });
+await p.reload();
+await p.getByRole('heading', { name: 'Thank You for Your Participation!' }).waitFor();
+check(true, 'the thank-you screen stays after a refresh (answers are final)');
+
+// --- automatic submission when the server deadline passes (this page's clock is fast-forwarded)
+const late = await ctx.newPage(); watch(late, 'late participant');
+await late.clock.install();
+await late.goto(`${BASE}/join`);
+await late.getByLabel('Six-digit join code').fill(code);
+await late.getByRole('button', { name: 'Continue', exact: true }).click();
+await late.getByLabel('Full name').fill('Late Runner');
+await late.getByLabel('College name').fill('NITK');
+await late.getByRole('button', { name: /Join quiz/ }).click();
+await late.getByRole('button', { name: 'Start the quiz' }).click();
+await late.locator('.play-question').waitFor();
+await late.clock.fastForward('11:00'); // past the 10-minute limit
+await late.getByRole('heading', { name: 'Thank You for Your Participation!' }).waitFor({ timeout: 15000 });
+check(/Time is up/.test(await late.locator('.play-finished').innerText()), 'timer expiry submits automatically and shows the thank-you message');
+await late.screenshot({ path: join(SHOTS, 'f05c-time-up.png') });
+await late.close();
 
 // --- leaderboard: name, college, section
 await tab('Leaderboard');

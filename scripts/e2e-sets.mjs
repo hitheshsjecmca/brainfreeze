@@ -207,7 +207,7 @@ await dlg.waitFor({ state: 'detached' });
 check(await b.locator('.play-q-text').count() === 1 && await b.getByText('Answer B saved').count() === 1, 'cancelling returns to the quiz with answers kept');
 await b.getByRole('button', { name: 'Submit Quiz' }).click();
 await b.getByRole('dialog').getByRole('button', { name: 'Submit now' }).click();
-await b.getByRole('heading', { name: 'Quiz submitted' }).waitFor();
+await b.getByRole('heading', { name: 'Thank You for Your Participation!' }).waitFor();
 check(true, 'team B submitted early and sees the confirmation');
 
 // --- organizer monitor shows attempt status and team progress

@@ -348,10 +348,14 @@ function teamOtherSet(st, session, teamId) {
   return other ? other.session.name : null;
 }
 
+/** Uniform integer in [0, n) from crypto randomness (rejection sampling: no modulo bias). */
 const randomInt = (n) => {
-  const [v] = globalThis.crypto.getRandomValues(new Uint32Array(1));
-  return v % n;
+  const limit = 2 ** 32 - (2 ** 32 % n);
+  const buf = new Uint32Array(1);
+  do globalThis.crypto.getRandomValues(buf); while (buf[0] >= limit);
+  return buf[0] % n;
 };
+/** Fisher–Yates shuffle of a copy (the list itself is never changed). */
 function shuffled(list) {
   const a = [...list];
   for (let i = a.length - 1; i > 0; i--) {

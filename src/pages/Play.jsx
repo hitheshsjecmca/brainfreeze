@@ -16,6 +16,7 @@ import { minutes } from '../lib/sets.js';
 import { formatClock } from '../lib/timer.js';
 import { clearDeviceSession, loadDeviceSession, loadPosition, savePosition } from '../participant/deviceSession.js';
 import { useAnswerSaver } from '../participant/useAnswerSaver.js';
+import { finishScreen, questionControls, submitQuiz, submitSummary } from '../participant/playFlow.js';
 
 const POLL_MS = 2000;
 
@@ -141,12 +142,6 @@ function Shell({ device, team, quizTitle, online, onLeave, children }) {
   );
 }
 
-const FINISHED = {
-  submitted: { title: 'Quiz submitted', text: 'Your answers are final. Your completion time was recorded by the server.' },
-  timed_out: { title: "TIME'S UP", text: 'Time is up. Your quiz has been submitted. Every answer you selected before the deadline was saved.' },
-  organizer_finalized: { title: 'Quiz closed', text: 'The organizer closed your attempt. Every answer accepted so far is saved.' },
-};
-
 /** Remaining time from the server deadline (never the device clock alone): deadline − (device time + measured offset). */
 function useAttemptRemaining(attempt, offset) {
   const now = useServerNow(offset, 250);
@@ -196,6 +191,8 @@ function Screen({ state, offset, device, refresh, goTo, saver }) {
   const total = quiz.duration_seconds * 1000;
   const remaining = useAttemptRemaining(attempt, offset);
   const expired = remaining !== null && remaining <= 0;
+  // Set once the server confirmed this device's Submit, so the thank-you screen never waits for the next poll.
+  const [confirmed, setConfirmed] = useState(false);
 
   // The server finalizes an expired attempt on its next read: re-check right after the deadline.
   useEffect(() => {
@@ -205,14 +202,15 @@ function Screen({ state, offset, device, refresh, goTo, saver }) {
   }, [expired, refresh]);
 
   if (quiz.status === 'finalized' && state.result) return <ResultScreen result={state.result} team={team} />;
-  if (FINISHED[attempt.status]) {
-    const f = FINISHED[attempt.status];
+  const done = finishScreen(attempt.status, { confirmed });
+  if (done) {
     return (
-      <div className="play-center">
-        {attempt.status === 'submitted' ? <CheckCircle2 size={44} aria-hidden="true" /> : <Hourglass size={44} aria-hidden="true" />}
-        <h1 className="play-big">{f.title}</h1>
-        <p>{f.text}</p>
-        <p className="muted small">Watch the main screen for results.</p>
+      <div className="play-center play-finished" data-finish={done.kind}>
+        {done.kind === 'thank_you' ? <CheckCircle2 size={44} aria-hidden="true" /> : <Hourglass size={44} aria-hidden="true" />}
+        <h1 className="play-big">{done.title}</h1>
+        {done.timedOut && <p className="muted small">Time is up — your quiz was submitted automatically with every answer you selected.</p>}
+        <p>{done.message}</p>
+        <p className="muted small">{done.note}</p>
       </div>
     );
   }
@@ -221,7 +219,7 @@ function Screen({ state, offset, device, refresh, goTo, saver }) {
       <div className="play-center">
         <Hourglass size={44} aria-hidden="true" />
         <h1 className="play-big">Set closed</h1>
-        <p>This quiz set has ended. Watch the main screen for results.</p>
+        <p>This quiz set has ended. You may now wait for further instructions from the organizers.</p>
       </div>
     );
   }
@@ -231,7 +229,7 @@ function Screen({ state, offset, device, refresh, goTo, saver }) {
       <div className="play-center">
         <Hourglass size={44} aria-hidden="true" />
         <h1 className="play-big">TIME&rsquo;S UP</h1>
-        <p role="status">Time is up. Your quiz has been submitted.</p>
+        <p role="status">Time is up. Submitting your quiz…</p>
         <p className="muted small"><Loader2 size={14} className="spin" /> Confirming with the server… Every answer you selected before the deadline is saved.</p>
       </div>
     );
@@ -247,12 +245,14 @@ function Screen({ state, offset, device, refresh, goTo, saver }) {
     );
   }
   if (!state.question) return <div className="play-center"><Loader2 className="spin" size={32} /><p>Loading your question…</p></div>;
+  const controls = questionControls(state.position ?? 0, state.progress?.length || quiz.total_questions);
   return (
     <>
       <TimeBar remaining={remaining} total={total} durationSeconds={quiz.duration_seconds} />
-      <Navigator state={state} goTo={goTo} />
+      <Navigator state={state} goTo={goTo} controls={controls} />
       <QuestionView key={state.question.id} state={state} saver={saver} />
-      <SubmitQuiz state={state} device={device} refresh={refresh} saver={saver} />
+      {/* Only on the last question; viewing it never submits anything — the participant must confirm. */}
+      {controls.showSubmit && <SubmitQuiz state={state} device={device} refresh={refresh} saver={saver} onSubmitted={() => setConfirmed(true)} />}
     </>
   );
 }
@@ -294,7 +294,7 @@ function Instructions({ state, device, refresh }) {
         {quiz.marks && <li>Correct {formatPoints(quiz.marks.correct)} · wrong {formatPoints(quiz.marks.incorrect)} · unanswered {formatPoints(quiz.marks.unanswered)}</li>}
         <li>Your timer starts when you press <b>Start</b>. The deadline is kept by the server: refreshing, reconnecting or switching tabs never pauses or restarts it.</li>
         <li>You get your own question and option order. Answer in any order: tapping an option saves it, and you can change it until you submit.</li>
-        <li>Press <b>Submit quiz</b> when you are done — equal scores are ranked by the faster completion time. When time runs out, your quiz is submitted automatically with every answer you selected.</li>
+        <li>Press <b>Submit Quiz</b> on the last question when you are done — equal scores are ranked by the faster completion time. When time runs out, your quiz is submitted automatically with every answer you selected.</li>
       </ul>
       {live ? (
         <button className="btn btn-primary btn-lg" onClick={start} disabled={busy}>{busy ? <Loader2 size={18} className="spin" /> : <PlayIcon size={18} />} Start the quiz</button>
@@ -306,8 +306,8 @@ function Instructions({ state, device, refresh }) {
   );
 }
 
-/** Submit the whole quiz early, after a confirmation that shows answered / unanswered counts (idempotent; safe to retry). */
-function SubmitQuiz({ state, device, refresh, saver }) {
+/** Submit the whole quiz, after a confirmation that shows answered / unanswered counts (idempotent; safe to retry). */
+function SubmitQuiz({ state, device, refresh, saver, onSubmitted }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -315,27 +315,19 @@ function SubmitQuiz({ state, device, refresh, saver }) {
   // Answers being saved right now count as answered for the confirmation.
   const current = state.question?.id;
   const done = (state.progress || []).filter((answered, i) => answered || (i === state.position && current && saver.pending[current])).length;
+  const summary = submitSummary(done, total);
 
   async function finish() {
     setBusy(true);
     setMsg('');
-    if (!(await saver.settle())) {
-      setBusy(false);
-      setMsg('Your last answer is still being saved. Check the connection, then try again.');
-      return;
-    }
-    for (let attempt = 0; attempt < 6; attempt++) {
-      try {
-        const res = await participantApi.finish(device.token);
-        if (!res.ok) setMsg(ERROR_MESSAGES[res.error] || 'Could not submit.');
-        else setOpen(false);
-        break;
-      } catch (e) {
-        if (toQuizError(e).code !== 'NETWORK' || attempt === 5) { setMsg('Could not reach the server. Your answers are saved; try again.'); break; }
-        await new Promise((r) => setTimeout(r, Math.min(4000, 500 * 2 ** attempt)));
-      }
-    }
+    const res = await submitQuiz({ finish: () => participantApi.finish(device.token), settle: saver.settle });
     setBusy(false);
+    if (res.ok) {
+      setOpen(false);
+      onSubmitted();
+    } else {
+      setMsg(res.message); // the dialog stays open: retrying is safe and saved answers are kept
+    }
     refresh();
   }
 
@@ -346,9 +338,9 @@ function SubmitQuiz({ state, device, refresh, saver }) {
         <Modal title="Submit your quiz?" onClose={() => !busy && setOpen(false)} labelledBy="submit-quiz-title">
           <div className="submit-summary">
             <div><b>{done}</b><small>answered</small></div>
-            <div className={total - done ? 'warn-text' : ''}><b>{total - done}</b><small>unanswered</small></div>
+            <div className={summary.unanswered ? 'warn-text' : ''}><b>{summary.unanswered}</b><small>unanswered</small></div>
           </div>
-          <p>{total - done ? `${total - done} unanswered question${total - done === 1 ? '' : 's'} will score as unanswered. ` : 'Every question is answered. '}After submitting you cannot change any answer.</p>
+          <p>{summary.text}</p>
           {msg && <p className="play-status warn" role="alert">{msg}</p>}
           <div className="modal-actions">
             <button className="btn btn-ghost" onClick={() => setOpen(false)} disabled={busy}>Cancel — keep answering</button>
@@ -361,7 +353,7 @@ function SubmitQuiz({ state, device, refresh, saver }) {
 }
 
 /** Self-paced: jump between this team's questions; answered ones are marked (never right/wrong). */
-function Navigator({ state, goTo }) {
+function Navigator({ state, goTo, controls }) {
   const { progress = [], position = 0 } = state;
   const done = progress.filter(Boolean).length;
   const nextOpen = (from) => {
@@ -375,9 +367,11 @@ function Navigator({ state, goTo }) {
   return (
     <nav className="play-nav" aria-label="Questions">
       <div className="play-nav-row">
-        <button className="btn btn-ghost btn-sm" onClick={() => goTo(position - 1)} disabled={position === 0}><ArrowLeft size={14} /> Previous</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => goTo(position - 1)} disabled={!controls.canPrevious}><ArrowLeft size={14} /> Previous</button>
         <span className="muted small" role="status">{done} of {progress.length} answered</span>
-        <button className="btn btn-ghost btn-sm" onClick={() => goTo(position + 1)} disabled={position >= progress.length - 1}>Next <ArrowRight size={14} /></button>
+        {controls.showNext
+          ? <button className="btn btn-ghost btn-sm" onClick={() => goTo(position + 1)}>Next <ArrowRight size={14} /></button>
+          : <span className="muted small">Last question</span>}
       </div>
       <ol className="play-palette">
         {progress.map((answered, i) => (
