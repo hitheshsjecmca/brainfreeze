@@ -7,7 +7,7 @@
 .brand-round em { font-style: normal; color: var(--muted); letter-spacing: .15em; }
 .brand-sm .brand-word { font-size: 1.15rem; }
 .brand-md .brand-word { font-size: 1.6rem; }
-.brand-lg .brand-word { font-size: 2.2rem; }
+.brand-lg .brand-word { font-size: clamp(1.45rem, 7vw, 2.2rem); }
 .brand-lg .brand-round { font-size: .85rem; }
 .brand-xl { flex-direction: column; text-align: center; gap: 1rem; }
 .brand-xl .brand-word { font-size: clamp(2.6rem, 8vw, 5.6rem); text-shadow: 0 0 40px rgba(127, 231, 255, .35); }
@@ -96,6 +96,9 @@
 .opt-b { background: linear-gradient(135deg, var(--opt-b-1), var(--opt-b-2)); }
 .opt-c { background: linear-gradient(135deg, var(--opt-c-1), var(--opt-c-2)); }
 .opt-d { background: linear-gradient(135deg, var(--opt-d-1), var(--opt-d-2)); }
+.opt-e { background: linear-gradient(135deg, var(--opt-e-1), var(--opt-e-2)); }
+.opt-f { background: linear-gradient(135deg, var(--opt-f-1), var(--opt-f-2)); }
+.alert-ok { background: rgba(52, 211, 153, .1); border-color: rgba(52, 211, 153, .45); color: #d1fae5; }
 .opt-u { background: rgba(255, 255, 255, .08); }
 .option-letter { display: inline-flex; align-items: center; gap: .35rem; font-family: var(--font-display); font-weight: 800; background: rgba(0, 0, 0, .25); border-radius: 10px; padding: .3rem .6rem; flex: none; }
 .option-text { font-weight: 600; overflow-wrap: anywhere; }

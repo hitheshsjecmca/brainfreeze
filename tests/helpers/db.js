@@ -63,3 +63,33 @@ export async function errCode(promise) {
   try { await promise; } catch (e) { return (e.message.match(/^([A-Z][A-Z0-9_]{2,39}):/) || [null, e.message])[1]; }
   return 'NO_ERROR';
 }
+
+let joinSeq = 0;
+/**
+ * Join a published set as a participant (migration 17): the six-digit code plus the participant's own name and college,
+ * as the anon role. Returns join_quiz's result (token, team, section…). `request` reuses a request id (retries).
+ */
+export async function joinQuiz(db, code, fullName, college = 'Test College', { ip = '10.200.0.1', request = null, section = null, device = null } = {}) {
+  const req = request || `0a0a0a0a-0000-4000-8000-${String(++joinSeq).padStart(12, '0')}`;
+  const r = await asRole(db, 'anon', null, 'select public.join_quiz($1, $2, $3, $4, $5, $6) as r',
+    [code, fullName, college, req, section, device], { 'x-forwarded-for': ip });
+  return { ...r.rows[0].r, request_id: req };
+}
+
+/** The entry (teams row) a participant created by joining `set` with this name. */
+export async function joinedTeam(db, set, fullName) {
+  return (await db.query('select * from public.teams where join_session_id = $1 and participant_1 = $2', [set, fullName])).rows[0] || null;
+}
+
+/**
+ * TEST FIXTURE ONLY: attach a pre-registered, organizer-selected team (e.g. one scored on paper) to a device, so tests
+ * of attempts, timers and scoring can use known team numbers. It calls the retired join_registered_team as the database
+ * owner — that function is no longer granted to any API role (migration 17), so the app cannot call it. The real
+ * participant path, join_quiz, is tested in self_join.sql.test.js.
+ */
+export async function attachTeam(db, code, section, num, ip = '10.250.0.1', device = null) {
+  return db.transaction(async (tx) => {
+    await tx.query(`select set_config('request.headers', $1, true)`, [JSON.stringify({ 'x-forwarded-for': ip })]);
+    return (await tx.query('select public.join_registered_team($1, $2, $3, $4) as r', [code, section, num, device])).rows[0].r;
+  });
+}

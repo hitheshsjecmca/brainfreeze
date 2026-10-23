@@ -1,10 +1,12 @@
 import { useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowDown, ArrowUp, ClipboardList, Copy, Download, Eye, EyeOff, FileUp, Pencil, Plus, Search, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, ClipboardList, Copy, Download, Eye, EyeOff, FileUp, Pencil, Plus, Save, Search, Sparkles, Trash2 } from 'lucide-react';
 import { useQuiz } from '../context/QuizContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import { EmptyState, Field, Modal, PageHeader } from '../components/Common.jsx';
 import { OptionGrid } from '../components/QuizBits.jsx';
-import { OPTIONS, OPTION_FIELDS } from '../lib/constants.js';
+import { MAX_OPTIONS, MIN_OPTIONS, OPTIONS, OPTION_FIELDS } from '../lib/constants.js';
+import { optionLetters } from '../lib/options.js';
+import { addOption, canAddOption, canRemoveOption, checkForm, countLines, editorForm, isFormDirty, removeOption } from '../lib/questionEditor.js';
 import { questionsToCSV, QUESTION_CSV_HEADERS } from '../lib/csv.js';
 import { downloadText, readFileDataURL, readFileText, stamp } from '../lib/download.js';
 import { useDraft } from '../lib/hooks.js';
@@ -12,7 +14,6 @@ import { validateQuestion } from '../lib/validation.js';
 import { parseQuestionFile } from '../lib/setWizard.js';
 import { SAMPLE_QUESTIONS } from '../data/sampleQuestions.js';
 
-const EMPTY = { question_text: '', option_a: '', option_b: '', option_c: '', option_d: '', correct_option: '', explanation: '', image_url: '', category: '', marks_correct: '', marks_incorrect: '', is_sample: false };
 const exportable = (q) => Object.fromEntries([...QUESTION_CSV_HEADERS, 'is_sample'].map((h) => [h, q[h] ?? null]));
 
 export default function Questions() {
@@ -40,7 +41,7 @@ export default function Questions() {
     if (category && q.category !== category) return false;
     if (onlySamples && !q.is_sample) return false;
     const s = query.trim().toLowerCase();
-    return !s || [q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.category].some((v) => (v || '').toLowerCase().includes(s));
+    return !s || [q.question_text, ...OPTIONS.map((l) => q[OPTION_FIELDS[l]]), q.category].some((v) => (v || '').toLowerCase().includes(s));
   });
 
   async function move(q, dir) {
@@ -53,7 +54,7 @@ export default function Questions() {
   }
 
   async function duplicate(q) {
-    const { id: _id, position, created_at: _c, updated_at: _u, ...rest } = q;
+    const { id: _id, position, created_at: _c, updated_at: _u, source_question_id: _s, ...rest } = q;
     // While live, append at the end so the numbering of the running quiz never shifts.
     const pos = live ? questions.length + 1 : position + 1;
     await act('saveQuestion', { ...rest, question_text: `${q.question_text} (copy)`, position: pos }, { success: `Duplicated as Q${pos}` });
@@ -100,7 +101,7 @@ export default function Questions() {
         <input ref={fileRef} type="file" accept=".csv,.json,text/csv,application/json" hidden onChange={onFile} />
         <button className="btn btn-ghost" disabled={!questions.length} onClick={() => downloadText(`brainfreze-questions-${stamp()}.csv`, questionsToCSV(questions), 'text/csv')}><Download size={16} /> CSV</button>
         <button className="btn btn-ghost" disabled={!questions.length} onClick={() => downloadText(`brainfreze-questions-${stamp()}.json`, JSON.stringify({ questions: questions.map(exportable) }, null, 2), 'application/json')}><Download size={16} /> JSON</button>
-        <button className="btn btn-primary" onClick={() => setEditing({ ...EMPTY })}><Plus size={16} /> New question</button>
+        <button className="btn btn-primary" onClick={() => setEditing({})}><Plus size={16} /> New question</button>
       </PageHeader>
 
       {live && <div className="inline-alert alert-info">The quiz is live: reordering and deleting are locked. Editing an answer key re-scores recorded answers (audited).</div>}
@@ -142,7 +143,7 @@ export default function Questions() {
                   </div>
                   <p className="q-text">{q.question_text}</p>
                   <ul className="q-options">
-                    {OPTIONS.map((l) => (
+                    {optionLetters(q).map((l) => (
                       <li key={l} className={showKeys && q.correct_option === l ? 'is-key' : ''}>
                         <b>{l}</b> {q[OPTION_FIELDS[l]]}
                       </li>
@@ -162,41 +163,84 @@ export default function Questions() {
         </ol>
       )}
 
-      {editing && <QuestionEditor question={editing} isDemo={isDemo} hasAnswers={!!answerCount.get(editing.id)} onClose={() => setEditing(null)} />}
+      {editing && <QuestionEditor question={editing} isDemo={isDemo} hasAnswers={!!answerCount.get(editing.id)} onClose={() => setEditing(null)}
+        savedCount={questions.length} numberOf={(q) => q.position} noun="the question bank" />}
       {importing && <ImportQuestions data={importing} hasQuestions={questions.length > 0} hasAnswers={answers.length > 0} live={live} onClose={() => setImporting(null)} />}
     </div>
   );
 }
 
-/** Add/edit a bank question (also used by the set wizard; `onSaved(id)` gets the saved question's id). */
-export function QuestionEditor({ question, isDemo, hasAnswers, onClose, onSaved }) {
-  const { act } = useQuiz();
+/**
+ * Add/edit questions (question bank and set wizard). Keeps the saved count visible, has a flexible 2–6 option
+ * editor and a live projector preview (never the key).
+ *  - `saveAction`: 'saveQuestion' (bank) or 'saveSetQuestion' (adds a NEW question to the selected draft set).
+ *  - `savedCount`: questions saved so far (the set's, or the bank's); `numberOf(q)` = an existing question's number.
+ *  - `onSaved(id, result, { isNew })` after every successful save.
+ * Save Question saves and closes; Save & Next saves and opens a clean editor for the next question; Cancel discards.
+ */
+export function QuestionEditor({ question, isDemo, hasAnswers, onClose, onSaved, saveAction = 'saveQuestion', savedCount, numberOf, noun = 'the question bank' }) {
+  // Each question opened (the first one, then every Save & Next) gets a fresh editor body.
+  const [current, setCurrent] = useState(question);
+  const [round, setRound] = useState(0);
+  return (
+    <EditorBody key={`${current.id || 'new'}:${round}`} question={current} isDemo={isDemo} hasAnswers={round === 0 && hasAnswers}
+      onClose={onClose} saveAction={saveAction} savedCount={savedCount} numberOf={numberOf} noun={noun}
+      onSaved={onSaved} onNext={() => { setCurrent({}); setRound((r) => r + 1); }} />
+  );
+}
+
+function EditorBody({ question, isDemo, hasAnswers, onClose, onSaved, onNext, saveAction, savedCount, numberOf, noun }) {
+  const { act, pendingKeys } = useQuiz();
   const { confirm, toast } = useUI();
-  const draftKey = `brainfreze-cold-start:question-draft:${question.id || 'new'}`;
-  const initial = { ...EMPTY, ...question, marks_correct: question.marks_correct ?? '', marks_incorrect: question.marks_incorrect ?? '', explanation: question.explanation ?? '', image_url: question.image_url ?? '', category: question.category ?? '' };
+  const isNew = !question.id;
+  const draftKey = `brainfreze-cold-start:question-draft:v2:${question.id || 'new'}`;
+  const initial = useMemo(() => editorForm(question), [question]);
   const [restoredDraft, setRestoredDraft] = useState(() => { try { return !!localStorage.getItem(draftKey); } catch { return false; } });
   const [form, setForm, clearDraft] = useDraft(draftKey, initial);
   const [touched, setTouched] = useState(false);
-  const check = validateQuestion(form);
+  const [saveError, setSaveError] = useState('');
+  const check = checkForm(form);
+  const busy = pendingKeys.has('saveQuestion');
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setOption = (i) => (e) => setForm((f) => ({ ...f, options: f.options.map((o, j) => (j === i ? e.target.value : o)) }));
   const err = (k) => (touched ? check.errors[k] : undefined);
+  const letters = OPTIONS.slice(0, form.options.length);
+  const lines = countLines({ saved: savedCount ?? 0, isNew, number: numberOf?.(question) ?? question.position, noun });
+  const firstError = Object.values(check.errors)[0];
 
-  async function submit(e) {
-    e.preventDefault();
+  async function save(next) {
     setTouched(true);
-    if (!check.ok) return;
-    if (question.id && hasAnswers && question.correct_option !== check.value.correct_option) {
+    setSaveError('');
+    if (!check.ok) { setSaveError(`Not saved: ${firstError}`); return; }
+    if (!isNew && hasAnswers && question.correct_option !== check.value.correct_option) {
       const ok = await confirm({
         title: 'Change the answer key?', danger: true, confirmLabel: 'Change key & re-score',
         message: <p>This question already has recorded answers. Changing the key from <strong>{question.correct_option}</strong> to <strong>{check.value.correct_option}</strong> re-scores them. Every change is written to the audit log.</p>,
       });
       if (!ok) return;
     }
-    const res = await act('saveQuestion', { ...check.value, id: question.id }, {
-      key: 'saveQuestion', success: question.id ? `Q${question.position} saved` : 'Question added',
+    const res = await act(saveAction, { ...check.value, id: question.id }, {
+      key: 'saveQuestion', errorTitle: 'Question not saved',
+      success: isNew ? `Question ${(savedCount ?? 0) + 1} saved` : 'Question saved',
       successDetail: (r) => (r?.rescored ? `${r.rescored} recorded answer(s) re-scored` : undefined),
     });
-    if (res.ok) { clearDraft(); onSaved?.(res.result?.id); onClose(); }
+    // A failed save keeps everything that was typed (and its local draft).
+    if (!res.ok) { setSaveError(res.error ? `Not saved: ${res.error.message}` : 'Not saved. Try again.'); return; }
+    clearDraft();
+    onSaved?.(res.result?.id, res.result, { isNew });
+    if (next) onNext(); else onClose();
+  }
+
+  async function cancel() {
+    if (isFormDirty(form, initial)) {
+      const ok = await confirm({
+        title: 'Discard this question?', danger: true, confirmLabel: 'Discard changes',
+        message: <p>Your unsaved changes to this question will be lost. Saved questions are not affected.</p>,
+      });
+      if (!ok) return;
+    }
+    clearDraft();
+    onClose();
   }
 
   async function onImage(e) {
@@ -209,25 +253,41 @@ export function QuestionEditor({ question, isDemo, hasAnswers, onClose, onSaved 
     setForm((f) => ({ ...f, image_url: url }));
   }
 
+  const preview = Object.fromEntries(letters.map((l, i) => [OPTION_FIELDS[l], form.options[i] || '…']));
   return (
-    <Modal title={question.id ? `Edit Q${question.position}` : 'New question'} onClose={onClose} wide>
-      {restoredDraft && <div className="inline-alert alert-info small">Unsaved draft restored (autosaved locally). <button className="btn btn-ghost btn-sm" onClick={() => { clearDraft(); setForm(initial); setRestoredDraft(false); }}>Discard draft</button></div>}
-      <form onSubmit={submit} className="editor" noValidate>
+    <Modal title={isNew ? 'New question' : 'Edit question'} onClose={cancel} wide>
+      <div className="editor-count" role="status" aria-live="polite">
+        <b>{lines.total}</b><span>{lines.current}</span>
+        {!isNew && question.source_question_id && <span className="badge badge-import badge-xs">Imported copy</span>}
+      </div>
+      {restoredDraft && <div className="inline-alert alert-info small">Unsaved draft restored (autosaved locally). <button type="button" className="btn btn-ghost btn-sm" onClick={() => { clearDraft(); setForm(initial); setRestoredDraft(false); }}>Discard draft</button></div>}
+      <form onSubmit={(e) => { e.preventDefault(); save(false); }} className="editor" noValidate>
         <div className="editor-fields">
           <Field label="Question text" error={err('question_text')}>
             <textarea rows={3} value={form.question_text} onChange={set('question_text')} maxLength={1000} />
           </Field>
-          {OPTIONS.map((l) => (
-            <div key={l} className={`option-edit opt-${l.toLowerCase()}`}>
-              <label className="radio-key" title={`Mark ${l} as correct`}>
-                <input type="radio" name="correct" value={l} checked={form.correct_option === l} onChange={set('correct_option')} aria-label={`Option ${l} is correct`} />
-                <span>{l}</span>
-              </label>
-              <Field label={`Option ${l}`} error={err(OPTION_FIELDS[l])}>
-                <input value={form[OPTION_FIELDS[l]]} onChange={set(OPTION_FIELDS[l])} maxLength={300} />
-              </Field>
+          <fieldset className="wz-fieldset">
+            <legend>Answer options ({form.options.length} of {MAX_OPTIONS}) — select the correct one</legend>
+            {letters.map((l, i) => (
+              <div key={l} className={`option-edit opt-${l.toLowerCase()}`}>
+                <label className="radio-key" title={`Mark ${l} as correct`}>
+                  <input type="radio" name="correct" value={l} checked={form.correct_option === l} onChange={set('correct_option')} aria-label={`Option ${l} is correct`} />
+                  <span>{l}</span>
+                </label>
+                <Field label={`Option ${l}`} error={err(OPTION_FIELDS[l])}>
+                  <input value={form.options[i]} onChange={setOption(i)} maxLength={300} />
+                </Field>
+                <button type="button" className="icon-btn danger" onClick={() => setForm((f) => removeOption(f, l))} disabled={!canRemoveOption(form)}
+                  aria-label={`Remove option ${l}`} title={canRemoveOption(form) ? `Remove option ${l}` : `A question needs at least ${MIN_OPTIONS} options`}><Trash2 size={16} /></button>
+              </div>
+            ))}
+            <div className="option-tools">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setForm(addOption)} disabled={!canAddOption(form)}>
+                <Plus size={16} /> Add Option
+              </button>
+              <span className="muted small">{canAddOption(form) ? `${MIN_OPTIONS}–${MAX_OPTIONS} options.` : `Maximum of ${MAX_OPTIONS} options reached.`}</span>
             </div>
-          ))}
+          </fieldset>
           {err('correct_option') && <p className="error-text" role="alert">{err('correct_option')}</p>}
           <div className="form-grid">
             <Field label="Category"><input value={form.category} onChange={set('category')} maxLength={80} list="cat-list" /></Field>
@@ -251,16 +311,18 @@ export function QuestionEditor({ question, isDemo, hasAnswers, onClose, onSaved 
           <label className="check"><input type="checkbox" checked={!!form.is_sample} onChange={(e) => setForm((f) => ({ ...f, is_sample: e.target.checked }))} /> Mark as SAMPLE (needs review)</label>
         </div>
         <aside className="editor-preview" aria-label="Projector preview">
-          <h3 className="muted small">Projector preview (key never shown on projector)</h3>
+          <h3 className="muted small">Projector preview (the correct answer is never shown on the projector)</h3>
           <div className="preview-frame">
             <p className="preview-q">{form.question_text || 'Question text…'}</p>
             {form.image_url && <img src={form.image_url} alt="" className="preview-img" />}
-            <OptionGrid question={{ option_a: form.option_a || '…', option_b: form.option_b || '…', option_c: form.option_c || '…', option_d: form.option_d || '…' }} size="sm" />
+            <OptionGrid question={{ ...preview, option_count: letters.length }} size="sm" />
           </div>
         </aside>
-        <div className="modal-actions span-all">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>Close (draft kept)</button>
-          <button className="btn btn-primary">Save question</button>
+        {saveError && <p className="inline-alert alert-danger span-all" role="alert"><AlertTriangle size={16} /> {saveError}</p>}
+        <div className="modal-actions span-all editor-actions">
+          <button type="button" className="btn btn-ghost" onClick={cancel} disabled={busy}>Cancel</button>
+          <button type="submit" className="btn btn-ghost" disabled={busy}><Save size={16} /> Save Question</button>
+          <button type="button" className="btn btn-primary" onClick={() => save(true)} disabled={busy}>{busy ? 'Saving…' : <>Save &amp; Next <ArrowRight size={16} /></>}</button>
         </div>
       </form>
     </Modal>

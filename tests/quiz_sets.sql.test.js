@@ -2,7 +2,7 @@
 // ranking against the real migrations (1–6) in PGlite. Organizer calls select a
 // set with the x-brainfreze-set header exactly as the browser does.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { asRole, createDb, errCode, ORG, STAFF, selectTeams } from './helpers/db.js';
+import { asRole, attachTeam, createDb, errCode, ORG, STAFF, selectTeams } from './helpers/db.js';
 
 let db;
 let n = 0;
@@ -15,7 +15,6 @@ const anon = async (fn, args = [], ip = '10.3.0.1') =>
   (await asRole(db, 'anon', null, `select public.${fn}(${ph(args)}) as r`, args, { 'x-forwarded-for': ip })).rows[0].r;
 const team = (num, section = 'UG') => ({ team_number: num, team_name: `${section} Team ${num}`, participant_1: 'A', participant_2: 'B', college_name: 'MCA College', section });
 const teamId = async (section, num) => (await db.query('select id from public.teams where section = $1 and team_number = $2', [section, num])).rows[0].id;
-const pinOf = async (section, num) => (await db.query('select c.pin from public.team_credentials c join public.teams t on t.id = c.team_id where t.section = $1 and t.team_number = $2', [section, num])).rows[0].pin;
 const attemptOf = async (set, section, num) => (await db.query(`select * from public.quiz_attempts where session_id = $1 and team_id = $2 and status <> 'reset'`, [set, await teamId(section, num)])).rows[0];
 const keyOf = async (set, qid) => (await db.query('select correct_option from public.set_questions where session_id = $1 and question_id = $2', [set, qid])).rows[0].correct_option;
 const KEY_WORDS = /correct_option|explanation|"result"|"points"|option_orders|question_order/;
@@ -31,9 +30,9 @@ async function draft(name, section, count, from = 0, settings = {}) {
   return id;
 }
 
-/** Join a team on a device and return its token. */
+/** Attach a registered team to a device (test fixture, see helpers/db.js) and return its token. */
 async function join(code, section, num, ip) {
-  const r = await anon('join_team', [code, num, await pinOf(section, num), null], ip);
+  const r = await attachTeam(db, code, section, num, ip);
   if (!r.ok) throw new Error(r.error);
   return r.token;
 }
@@ -71,13 +70,15 @@ describe('quiz set lifecycle', () => {
     expect((await db.query('select count(*)::int c from public.set_questions where session_id = $1', [s1])).rows[0].c).toBe(1);
     const s29 = await draft('29', 'PG', 29);
     expect((await org('publish_quiz', [], s29)).join_code).toMatch(/^\d{6}$/);
-    // The bank (null selection) has 62 questions — more than the old 60 maximum.
-    const all = await org('create_set', [{ name: 'All', section: 'UG' }]);
+    // The whole 62-question bank — more than the old 60 maximum.
+    const all = await draft('All', 'UG', 62);
     expect((await org('publish_quiz', [], all)).join_code).toMatch(/^\d{6}$/);
     expect((await db.query('select count(*)::int c from public.set_questions where session_id = $1', [all])).rows[0].c).toBe(62);
-    // An explicit empty selection is refused; a draft always keeps at least one question.
+    // A new set starts empty (never the bank); an empty draft is saved but cannot be published.
     const empty = await org('create_set', [{ name: 'Empty', section: 'UG' }]);
-    expect(await errCode(org('update_quiz_details', [{ question_ids: [] }], empty))).toBe('VALIDATION');
+    expect((await db.query('select question_ids from public.quiz_sessions where id = $1', [empty])).rows[0].question_ids).toEqual([]);
+    expect(await errCode(org('update_quiz_details', [{ question_ids: [] }], empty))).toBe('NO_ERROR');
+    expect(await errCode(org('publish_quiz', [], empty))).toBe('QUESTION_COUNT');
     await org('delete_set', [empty]);
     for (const id of [s1, s29, all]) await org('archive_set', [id, 'test cleanup']);
   });
@@ -147,15 +148,18 @@ describe('join codes and access', () => {
     expect((await anon('join_lookup', [codeB])).quiz).toMatchObject({ title: 'UG Afternoon', section: 'UG', duration_seconds: 600, total_questions: 30 });
   });
 
-  it('wrong-section teams cannot join; the code identifies the set, not the team', async () => {
-    expect(await anon('join_team', [codePG, 4, await pinOf('UG', 4), null], '10.3.1.1')).toEqual({ ok: false, error: 'INVALID_TEAM_OR_PIN' });
-    expect(await anon('join_team', [codeA, 1, await pinOf('PG', 1), null], '10.3.1.2')).toEqual({ ok: false, error: 'INVALID_TEAM_OR_PIN' });
+  it('the code identifies the set and its section; a client claiming another section is refused', async () => {
+    expect(await anon('join_quiz', [codePG, 'Asha', 'MCA College', rid(), 'UG', null], '10.3.1.1')).toEqual({ ok: false, error: 'SECTION_MISMATCH', section: 'PG' });
+    const r = await anon('join_quiz', [codeA, 'Asha', 'MCA College', rid(), null, null], '10.3.1.2');
+    expect(r).toMatchObject({ ok: true, section: 'UG', team: { section: 'UG', participant_1: 'Asha' } });
+    // the retired PIN sign-in is not callable any more
+    expect(await errCode(anon('join_team', [codeA, 1, 'ABCDEF', null], '10.3.1.2'))).toMatch(/permission denied/);
   });
 
   it('one set per team per section: a team in UG Morning cannot be selected for or join UG Afternoon', async () => {
     await join(codeA, 'UG', 1, '10.3.1.3');
     expect(await errCode(selectTeams(db, ugB, [1, 2]))).toBe('TEAM_IN_OTHER_SET');
-    expect(await anon('join_team', [codeB, 1, await pinOf('UG', 1), null], '10.3.1.4')).toEqual({ ok: false, error: 'TEAM_NOT_SELECTED' });
+    expect(await attachTeam(db, codeB, 'UG', 1, '10.3.1.4')).toEqual({ ok: false, error: 'TEAM_NOT_SELECTED' });
     await join(codeB, 'UG', 2, '10.3.1.5'); // a different team can
     // PG sets are independent of UG ones.
     await join(codePG, 'PG', 1, '10.3.1.6');
@@ -236,8 +240,8 @@ describe('attempts: shuffling, timer, submission and ranking', () => {
     expect(p0.question.option_d).toBe(q[`option_${perm[3].toLowerCase()}`]);
     expect(JSON.stringify(p0)).not.toMatch(KEY_WORDS);
     expect(JSON.stringify(p0)).not.toMatch(/SECRET/);
-    // a reconnecting device resumes the same attempt
-    await db.query(`update public.participant_sessions set last_seen_at = now() - interval '2 minutes' where team_id = $1`, [await teamId('UG', 10)]);
+    // a replacement device (after the organizer releases the old one) resumes the same attempt
+    await org('revoke_participant', [await teamId('UG', 10)], set);
     tok[10] = await join(code, 'UG', 10, '10.4.0.10');
     expect((await attemptOf(set, 'UG', 10)).id).toBe(a.id);
     expect((await anon('participant_state', [tok[10], 0])).question.id).toBe(a.question_order[0]);

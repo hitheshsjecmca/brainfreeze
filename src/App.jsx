@@ -36,22 +36,12 @@ const NewSetWizard = lazy(() => import('./components/SetWizard.jsx').then((m) =>
 const QuizSets = lazy(() => import('./pages/QuizSets.jsx'));
 const Join = lazy(() => import('./pages/Join.jsx'));
 const Play = lazy(() => import('./pages/Play.jsx'));
-const RegistrationLogin = lazy(() => import('./pages/RegistrationLogin.jsx'));
-const RegistrationDesk = lazy(() => import('./pages/RegistrationDesk.jsx'));
 
 function RequireOrganizer({ children }) {
   const { loading, user, organizer } = useAuth();
   const location = useLocation();
   if (loading) return <Loading label="Checking organizer access…" />;
   if (!user || !organizer) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
-  return children;
-}
-
-// Registration desk: registration staff OR organizers. Never grants quiz control.
-function RequireRegistrar({ children }) {
-  const { loading, user, registrar } = useAuth();
-  if (loading) return <Loading label="Checking registration access…" />;
-  if (!user || !registrar) return <Navigate to="/registration/login" replace />;
   return children;
 }
 
@@ -73,10 +63,9 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/login" element={<Login />} />
-              {/* Registration desk: separate login and console; team registrations only */}
-              <Route path="/registration/login" element={<RegistrationLogin />} />
-              <Route path="/registration" element={<RequireRegistrar><RegistrationDesk /></RequireRegistrar>} />
-              {/* Participant routes: no organizer login; authorized by join code + registered team + device token */}
+              {/* The registration desk was removed: participants enter their own details when they join. Old links go home. */}
+              <Route path="/registration/*" element={<Navigate to="/" replace />} />
+              {/* Participant routes: no organizer login; authorized by the join code + the participant's details, then a device token */}
               <Route path="/join" element={<Join />} />
               <Route path="/play" element={<Play />} />
               <Route path="/projector" element={<RequireOrganizer><Projector /></RequireOrganizer>} />

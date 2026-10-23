@@ -1,4 +1,5 @@
-import { APP_ID, BACKUP_FORMAT_VERSION, DEFAULT_SETTINGS, PROJECTOR_VIEWS, SECTIONS } from './constants.js';
+import { APP_ID, BACKUP_FORMAT_VERSION, DEFAULT_SETTINGS, OPTIONS, PROJECTOR_VIEWS, SECTIONS } from './constants.js';
+import { optionLetters } from './options.js';
 import { fail } from './errors.js';
 import { validateQuestion, validateSettings, validateTeam } from './validation.js';
 import { uuid } from './ids.js';
@@ -101,19 +102,25 @@ export function validateBackup(b) {
   const teams = b.teams.map((t, i) => {
     if (!isUuid(t.id)) bad(`team ${i + 1} has no valid id`);
     // Older backups have no college names; they are completed later on the Teams page.
-    const { value, ok, errors } = validateTeam(t, b.teams.slice(0, i), null, { requireCollege: false });
+    const { value, ok, errors } = validateTeam(t, b.teams.slice(0, i), null, { requireCollege: false, requirePartner: !t.join_session_id });
     if (!ok) bad(`team ${i + 1}: ${Object.values(errors)[0]}`);
-    return { ...value, self_registered: !!t.self_registered, id: t.id, created_at: t.created_at, updated_at: t.updated_at };
+    return {
+      ...value, self_registered: !!t.self_registered, id: t.id, created_at: t.created_at, updated_at: t.updated_at,
+      join_session_id: isUuid(t.join_session_id) ? t.join_session_id : null, join_request_id: isUuid(t.join_request_id) ? t.join_request_id : null,
+    };
   });
   const teamIds = new Set(teams.map((t) => t.id));
 
   const questions = [...b.questions].sort((x, y) => x.position - y.position).map((q, i) => {
     if (!isUuid(q.id)) bad(`question ${i + 1} has no valid id`);
-    const { value, ok, errors } = validateQuestion(q);
+    const { option_count: _n, ...rest } = q;
+    const { value, ok, errors } = validateQuestion(rest);
     if (!ok) bad(`question ${i + 1}: ${Object.values(errors)[0]}`);
-    return { ...value, id: q.id, position: i + 1, created_at: q.created_at, updated_at: q.updated_at };
+    const { option_count: _c, ...stored } = value;
+    return { ...stored, id: q.id, position: i + 1, created_at: q.created_at, updated_at: q.updated_at, source_question_id: isUuid(q.source_question_id) ? q.source_question_id : null };
   });
   const questionIds = new Set(questions.map((q) => q.id));
+  for (const q of questions) if (q.source_question_id && !questionIds.has(q.source_question_id)) q.source_question_id = null;
 
   const seenSets = new Set();
   const attempts = [];
@@ -125,10 +132,11 @@ export function validateBackup(b) {
     const settingsCheck = validateSettings({ ...DEFAULT_SETTINGS, ...(item.settings || {}) });
     if (!settingsCheck.ok) bad(`${section} settings: ${Object.values(settingsCheck.errors)[0]}`);
     const setQuestions = (Array.isArray(item.set_questions) ? item.set_questions : []).filter((q) => questionIds.has(q.question_id)).map((q) => {
-      if (!['A', 'B', 'C', 'D'].includes(q.correct_option)) bad('a frozen set question has no valid answer key');
+      if (!optionLetters(q).includes(q.correct_option)) bad('a frozen set question has no valid answer key');
       return {
         question_id: q.question_id, position: Number(q.position), question_text: q.question_text, option_a: q.option_a, option_b: q.option_b,
-        option_c: q.option_c, option_d: q.option_d, image_url: q.image_url || null, category: q.category || null, correct_option: q.correct_option,
+        option_c: q.option_c || null, option_d: q.option_d || null, option_e: q.option_e || null, option_f: q.option_f || null,
+        image_url: q.image_url || null, category: q.category || null, correct_option: q.correct_option,
         explanation: q.explanation || null, marks_correct: Number(q.marks_correct), marks_incorrect: Number(q.marks_incorrect),
       };
     });
@@ -149,6 +157,7 @@ export function validateBackup(b) {
     return { session, settings: settingsCheck.value, set_questions: setQuestions, frozen_at: frozenAt || null };
   });
   const sessionIds = new Set(sets.map((x) => x.session.id));
+  for (const t of teams) if (t.join_session_id && !sessionIds.has(t.join_session_id)) t.join_session_id = null;
 
   const seen = new Set();
   const answers = b.answers.filter((a) => sessionIds.has(a.session_id)).map((a, i) => {
@@ -157,12 +166,12 @@ export function validateBackup(b) {
     if (seen.has(key)) bad(`duplicate answer for team/question in answer ${i + 1}`);
     seen.add(key);
     if (!['correct', 'incorrect', 'unanswered'].includes(a.result)) bad(`answer ${i + 1} result`);
-    if (!(a.selected_option === null || ['A', 'B', 'C', 'D'].includes(a.selected_option))) bad(`answer ${i + 1} option`);
+    if (!(a.selected_option === null || OPTIONS.includes(a.selected_option))) bad(`answer ${i + 1} option`);
     return {
       id: isUuid(a.id) ? a.id : uuid(), session_id: a.session_id, team_id: a.team_id, question_id: a.question_id,
       selected_option: a.selected_option, result: a.result, points: Number(a.points), source: a.source === 'participant' ? 'participant' : 'organizer',
       attempt_id: attempts.some((x) => x.id === a.attempt_id) ? a.attempt_id : null,
-      displayed_option: ['A', 'B', 'C', 'D'].includes(a.displayed_option) ? a.displayed_option : null,
+      displayed_option: OPTIONS.includes(a.displayed_option) ? a.displayed_option : null,
       on_time: typeof a.on_time === 'boolean' ? a.on_time : null,
       created_at: a.created_at, updated_at: a.updated_at,
     };

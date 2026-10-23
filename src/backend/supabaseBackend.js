@@ -59,6 +59,10 @@ const RPC = {
   resetAttempt: (p) => ['reset_attempt', { p_team_id: p.team_id, p_reason: p.reason ?? null }],
   setSetTeams: (p) => ['set_set_teams', { p_set_id: p.set_id, p_team_ids: p.team_ids, p_reason: p.reason ?? null }],
   correctSetQuestion: (p) => ['correct_set_question', { p_question_id: p.question_id, p: keyPatch(p), p_reason: p.reason ?? null }],
+  // fresh sets (migration 17): Save & Next, browse and copy questions from previous sets
+  saveSetQuestion: (p) => ['save_set_question', { p }],
+  previousSetQuestions: () => ['previous_set_questions', {}],
+  importSetQuestions: (p) => ['import_set_questions', { p_items: p.items }],
 };
 
 // Round 2 trivia board (migration 7). Not scoped to a quiz set.
@@ -88,25 +92,19 @@ const r2Tiles = (topics) => (topics || []).map((t) => ({ ...t, questions: t.ques
 // RPCs that return a bare set id; the demo engine returns { id }.
 const RETURNS_ID = new Set(['createSet', 'duplicateSet', 'newSession']);
 
-// Participant functions (callable without an account; authorized by join code + registered team / device token).
+// Participant functions (callable without an account; authorized by the join code + the participant's own details,
+// then by the device token). The section always comes from the code; the client's section is only a cross-check.
 const PARTICIPANT_RPC = {
   lookup: (code) => ['join_lookup', { p_code: code }],
-  roster: (p) => ['join_roster', { p_code: p.code, p_section: p.section }],
-  joinRegistered: (p) => ['join_registered_team', { p_code: p.code, p_section: p.section, p_team_number: Number(p.team_number), p_device_label: p.device_label ?? null }],
-  joinTeam: (p) => ['join_team', { p_code: p.code, p_team_number: Number(p.team_number), p_pin: p.pin, p_device_label: p.device_label ?? null }],
-  registerTeam: (p) => ['register_team', { p_code: p.code, p_team_name: p.team_name, p_participant_1: p.participant_1, p_participant_2: p.participant_2, p_college_name: p.college_name, p_device_label: p.device_label ?? null }],
+  joinQuiz: (p) => ['join_quiz', {
+    p_code: p.code, p_full_name: p.full_name, p_college_name: p.college_name, p_request_id: p.request_id,
+    p_section: p.section ?? null, p_device_label: p.device_label ?? null,
+  }],
   state: (token, position = null) => ['participant_state', { p_token: token, p_position: position }],
   start: (token) => ['participant_start', { p_token: token }],
   submit: (p) => ['participant_submit', { p_token: p.token, p_request_id: p.request_id, p_question_id: p.question_id, p_option: p.option }],
   finish: (token) => ['participant_finish', { p_token: token }],
   leave: (token) => ['participant_leave', { p_token: token }],
-};
-
-// Registration desk (registration staff or organizers; checked in SQL).
-const REG_RPC = {
-  access: () => ['registration_access', {}],
-  overview: () => ['reg_overview', {}],
-  saveTeam: (p) => ['reg_save_team', { p }],
 };
 
 const SET_HEADER = 'x-brainfreze-set';
@@ -358,9 +356,9 @@ export const supabaseBackend = {
       fetchAll(() => supabase.from('teams').select('id, team_number, team_name').eq('section', session.section).order('team_number')),
       published
         // frozen snapshot — select only public columns (never the key)
-        ? fetchAll(() => supabase.from('set_questions').select('question_id, position, question_text, option_a, option_b, option_c, option_d, image_url')
+        ? fetchAll(() => supabase.from('set_questions').select('question_id, position, question_text, option_a, option_b, option_c, option_d, option_e, option_f, image_url')
           .eq('session_id', id).order('position')).then((rows) => rows.map(({ question_id, ...r }) => ({ ...r, id: question_id })))
-        : fetchAll(() => supabase.from('questions').select('id, position, question_text, option_a, option_b, option_c, option_d, image_url').order('position'))
+        : fetchAll(() => supabase.from('questions').select('id, position, question_text, option_a, option_b, option_c, option_d, option_e, option_f, image_url').order('position'))
           .then((rows) => (session.question_ids ? rows.filter((r) => session.question_ids.includes(r.id)) : rows)),
       q(setRpc('get_standings', {}, { setId: id })),
       serverOffset(),
@@ -459,11 +457,6 @@ export const supabaseBackend = {
       return () => { supabase.removeChannel(ch); };
     },
   },
-
-  registration: Object.fromEntries(Object.entries(REG_RPC).map(([name, map]) => [name, async (arg) => {
-    const [fn, args] = map(arg);
-    return q(supabase.rpc(fn, args));
-  }])),
 
   participant: {
     ...Object.fromEntries(Object.entries(PARTICIPANT_RPC).map(([name, map]) => [name, async (...arg) => {

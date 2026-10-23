@@ -1,8 +1,7 @@
-// Demo-mode mirror of the PIN-free participant flow
-// (src/lib/engine.js ↔ supabase/migrations/20261019000100_round1_participant_flow.sql).
+// Demo-mode mirror of the participant self-join flow
+// (src/lib/engine.js ↔ supabase/migrations/20261027000100_fresh_sets_options_self_join.sql).
 import { describe, expect, it } from 'vitest';
 import { applyAction, createEmptyState, sessionQuestions, setResults, setView } from '../src/lib/engine.js';
-import { selectTeams } from './helpers/engine.js';
 
 const T0 = Date.parse('2026-10-19T09:00:00Z');
 let r = 0;
@@ -10,51 +9,87 @@ const req = () => `cdcdcdcd-0000-4000-8000-${String(++r).padStart(12, '0')}`;
 const call = (s, name, p = {}, to = 'UG', now = T0) => applyAction(s, name, p, { now, ...(to.length > 2 ? { setId: to } : { section: to }) });
 const run = (...a) => call(...a).state;
 const iso = (ms) => new Date(ms).toISOString();
-const team = (n, section) => ({ team_number: n, team_name: `${section} Frost ${n}`, participant_1: `Asha ${n}`, participant_2: `Ravi ${n}`, college_name: 'Private College', section });
 const attempt = (s, setId, teamId) => s.attempts.find((a) => a.session_id === setId && a.team_id === teamId && a.status !== 'reset');
-const tid = (s, n) => s.teams.find((t) => t.section === 'UG' && t.team_number === n).id;
 
-/** A published UG set (4 questions, 10 minutes) with UG teams 1–4 and PG team 1. */
+/** A published UG set (4 questions, 10 minutes). Nobody is pre-registered or pre-selected. */
 function world() {
   let s = createEmptyState(T0);
   s = run(s, 'importQuestions', { items: Array.from({ length: 4 }, (_, i) => ({ question_text: `Q${i + 1}?`, option_a: `a${i}`, option_b: `b${i}`, option_c: `c${i}`, option_d: `d${i}`, correct_option: 'ABCD'[i] })) });
-  s = run(s, 'importTeams', { rows: [1, 2, 3, 4].map((n) => team(n, 'UG')) }, 'UG');
-  s = run(s, 'importTeams', { rows: [team(1, 'PG')] }, 'PG');
   const c = call(s, 'createSet', { name: 'UG Flow', section: 'UG' });
   const id = c.result.id;
   s = run(c.state, 'updateQuizDetails', { question_ids: c.state.questions.map((q) => q.id) }, id);
   s = run(s, 'updateSettings', { duration_seconds: 600 }, id);
   const pub = call(s, 'publishQuiz', {}, id);
-  return { s: selectTeams(pub.state, id, null, T0), id, code: pub.result.join_code };
+  return { s: pub.state, id, code: pub.result.join_code };
 }
-const join = (s, code, n, section = 'UG', now = T0) => call(s, 'joinRegisteredTeam', { code, section, team_number: n }, 'UG', now);
+const person = (n) => ({ full_name: `Asha ${n}`, college_name: `College ${n}` });
+const join = (s, code, n, extra = {}, now = T0) => call(s, 'joinQuiz', { code, ...person(n), request_id: req(), ...extra }, 'UG', now);
+const entry = (s, setId, n) => s.teams.find((t) => t.join_session_id === setId && t.participant_1 === `Asha ${n}`);
+const tid = (s, n) => s.teams.find((t) => t.participant_1 === `Asha ${n}`).id;
 
-describe('PIN-free join (demo engine)', () => {
-  it('lists registered teams for the matching section only, without private data', () => {
-    const { s, code } = world();
-    const ros = call(s, 'joinRoster', { code, section: 'ug' }).result;
-    expect(ros.teams.map((t) => t.team_number)).toEqual([1, 2, 3, 4]);
-    expect(ros.teams[0]).toEqual({ team_number: 1, team_name: 'UG Frost 1', participant_1: 'Asha 1', participant_2: 'Ravi 1', joined: false });
-    expect(JSON.stringify(ros)).not.toMatch(/college|pin|"id"/i);
-    expect(call(s, 'joinRoster', { code, section: 'PG' }).result).toEqual({ ok: false, error: 'SECTION_MISMATCH', section: 'UG' });
-    expect(call(s, 'joinRoster', { code: '000000', section: 'UG' }).result.error).toBe('INVALID_CODE');
+describe('participant self-join (demo engine)', () => {
+  it('joins with a valid code and own details; the section comes from the code; no pre-registration', () => {
+    const { s, id, code } = world();
+    expect(s.teams).toHaveLength(0);
+    const r = join(s, code, 1, { full_name: '  Asha   1 ', college_name: ' College 1  ', section: 'UG' });
+    expect(r.result).toMatchObject({ ok: true, section: 'UG', resumed: false, team: { participant_1: 'Asha 1', college_name: 'College 1', section: 'UG', self_joined: true } });
+    const t = entry(r.state, id, 1);
+    expect(t).toMatchObject({ section: 'UG', college_name: 'College 1', participant_2: null, self_registered: true });
+    expect(setView(r.state, id).session.team_ids).toEqual([t.id]);
+    expect(r.state.attempts.filter((a) => a.team_id === t.id)).toHaveLength(1);
   });
 
-  it('refuses unregistered teams and the wrong section; binds a team to one device until released', () => {
+  it('refuses invalid codes, a different section and missing or malformed details', () => {
+    const { s, code } = world();
+    expect(join(s, '000000', 1).result.error).toBe('INVALID_CODE');
+    expect(join(s, code, 1, { section: 'PG' }).result).toEqual({ ok: false, error: 'SECTION_MISMATCH', section: 'UG' });
+    expect(join(s, code, 1, { full_name: '   ' }).result).toMatchObject({ ok: false, error: 'VALIDATION', field: 'full_name' });
+    expect(join(s, code, 1, { college_name: '' }).result).toMatchObject({ ok: false, error: 'VALIDATION', field: 'college_name' });
+    expect(join(s, code, 1, { full_name: 'x'.repeat(81) }).result.error).toBe('VALIDATION');
+    expect(join(s, code, 1, { full_name: '<script>' }).result.error).toBe('VALIDATION');
+    expect(join(s, code, 1, { request_id: null }).result.error).toBe('VALIDATION');
+  });
+
+  it('a retried request never creates a second entry or attempt; the same person on another device is refused until released', () => {
     let { s, id, code } = world();
-    expect(join(s, code, 77).result).toEqual({ ok: false, error: 'TEAM_NOT_REGISTERED' });
-    expect(join(s, code, 1, 'PG').result.error).toBe('SECTION_MISMATCH');
-    const first = join(s, code, 1);
-    s = first.state;
-    expect(first.result).toMatchObject({ ok: true, team: { team_number: 1 } });
-    expect(call(s, 'joinRoster', { code, section: 'UG' }).result.teams[0].joined).toBe(true);
-    expect(join(s, code, 1, 'UG', T0 + 3600_000).result).toEqual({ ok: false, error: 'TEAM_ALREADY_JOINED' }); // no idle takeover
-    const a = attempt(s, id, tid(s, 1));
+    const rid = req();
+    const first = call(s, 'joinQuiz', { code, ...person(1), request_id: rid }, 'UG');
+    const retry = call(first.state, 'joinQuiz', { code, ...person(1), request_id: rid }, 'UG');
+    s = retry.state;
+    expect(retry.result).toMatchObject({ ok: true, resumed: true });
+    expect(s.teams.filter((t) => t.join_session_id === id)).toHaveLength(1);
+    expect(s.attempts.filter((a) => a.team_id === tid(s, 1) && a.status !== 'reset')).toHaveLength(1);
+    // the first (lost) token was replaced by the retry's token
+    expect(call(s, 'participantState', { token: first.result.token }).result.ok).toBe(false);
+    expect(call(s, 'participantState', { token: retry.result.token }).result.ok).toBe(true);
+    // the same name + college from another device (new request id): refused while the first device is signed in
+    expect(join(s, code, 1, { full_name: 'ASHA 1', college_name: 'college 1' }).result.error).toBe('ALREADY_JOINED');
+    const a = s.attempts.find((x) => x.team_id === tid(s, 1));
     s = run(s, 'revokeParticipant', { team_id: tid(s, 1) }, id);
     const again = join(s, code, 1);
-    expect(again.result.ok).toBe(true);
-    expect(attempt(again.state, id, tid(s, 1)).id).toBe(a.id);
-    expect(again.state.attempts.filter((x) => x.team_id === tid(s, 1))).toHaveLength(1);
+    expect(again.result).toMatchObject({ ok: true, resumed: true });
+    expect(again.state.attempts.filter((x) => x.team_id === tid(s, 1))).toEqual([expect.objectContaining({ id: a.id })]);
+    // a different request id with other details is a different participant
+    expect(join(again.state, code, 2).result.ok).toBe(true);
+  });
+
+  it('closing registration stops new participants but lets joined ones come back', () => {
+    let { s, id, code } = world();
+    s = join(s, code, 1).state;
+    s = run(s, 'revokeParticipant', { team_id: tid(s, 1) }, id);
+    s = run(s, 'setRegistration', { open: false }, id);
+    expect(join(s, code, 2).result.error).toBe('REGISTRATION_CLOSED');
+    expect(join(s, code, 1).result.ok).toBe(true);
+  });
+
+  it('going live needs no pre-selected teams; results show the participant with name, college and section', () => {
+    let { s, id, code } = world();
+    s = run(s, 'startQuiz', {}, id); // nobody has joined yet: allowed
+    const j = join(s, code, 1);
+    s = j.state;
+    const row = setResults(s, id).find((x) => x.team_id === tid(s, 1));
+    expect(row).toMatchObject({ team_name: 'Asha 1' });
+    expect(s.teams.find((t) => t.id === row.team_id)).toMatchObject({ college_name: 'College 1', section: 'UG' });
   });
 });
 

@@ -7,7 +7,9 @@ import { Modal } from '../components/Common.jsx';
 import { OptionTile } from '../components/QuizBits.jsx';
 import { isDemoMode, participantApi } from '../backend/index.js';
 import { ERROR_MESSAGES, toQuizError } from '../lib/errors.js';
-import { OPTIONS, OPTION_FIELDS } from '../lib/constants.js';
+import { OPTION_FIELDS } from '../lib/constants.js';
+import { optionLetters } from '../lib/options.js';
+import { participantNames } from '../lib/teamSelection.js';
 import { formatPoints } from '../lib/scoring.js';
 import { useServerNow } from '../lib/hooks.js';
 import { minutes } from '../lib/sets.js';
@@ -87,7 +89,7 @@ function PlayInner({ device }) {
   }, [poll]);
 
   async function leave() {
-    if (!window.confirm('Sign this device out of the quiz? To come back, join again with the code and choose your team.')) return;
+    if (!window.confirm('Sign this device out of the quiz? To come back, join again with the code and the same name and college (an organizer may need to release this device first).')) return;
     try { await participantApi.leave(device.token); } catch { /* sign out locally anyway */ }
     clearDeviceSession();
     navigate('/join', { replace: true });
@@ -125,8 +127,8 @@ function Shell({ device, team, quizTitle, online, onLeave, children }) {
       <header className="play-head glass">
         <div className="play-brand"><BrandMark size={34} /><div><b>BRAIN<span>FREZE</span></b><small>{quizTitle || device.quiz_title || 'COLD START'}</small></div></div>
         <div className="play-team">
-          <b>Team {t?.team_number}</b>
-          <span>{t?.team_name}</span>
+          <b>{t?.self_joined ? t?.participant_1 : `Team ${t?.team_number}`}</b>
+          <span>{t?.self_joined ? `${t?.college_name || ''}${t?.section ? ` · ${t.section}` : ''}` : t?.team_name}</span>
         </div>
         <span className={`badge ${online ? 'badge-ok' : 'badge-danger'}`} role="status" aria-live="polite">
           {online ? <><Wifi size={13} /> Connected</> : <><WifiOff size={13} /> Reconnecting…</>}
@@ -283,15 +285,15 @@ function Instructions({ state, device, refresh }) {
     <div className="play-center lobby">
       <h1>{quiz.title}</h1>
       <div className="lobby-team glass">
-        <b>Team {team.team_number} · {team.team_name}</b>
-        <span>{team.participant_1} &amp; {team.participant_2}</span>
+        <b>{team.self_joined ? team.participant_1 : `Team ${team.team_number} · ${team.team_name}`}</b>
+        <span>{team.self_joined ? `${team.college_name || ''}${team.section ? ` · Verified section: ${team.section}` : ''}` : participantNames(team)}</span>
       </div>
       {quiz.description && <p className="instructions-text">{quiz.description}</p>}
       <ul className="rules glass">
         <li>{quiz.section ? `${quiz.section} section · ` : ''}<b>{quiz.total_questions} question{quiz.total_questions === 1 ? '' : 's'}</b> · <b>{minutes(quiz.duration_seconds)} minutes</b></li>
         {quiz.marks && <li>Correct {formatPoints(quiz.marks.correct)} · wrong {formatPoints(quiz.marks.incorrect)} · unanswered {formatPoints(quiz.marks.unanswered)}</li>}
         <li>Your timer starts when you press <b>Start</b>. The deadline is kept by the server: refreshing, reconnecting or switching tabs never pauses or restarts it.</li>
-        <li>Your team gets its own question and option order. Answer in any order: tapping an option saves it, and you can change it until you submit.</li>
+        <li>You get your own question and option order. Answer in any order: tapping an option saves it, and you can change it until you submit.</li>
         <li>Press <b>Submit quiz</b> when you are done — equal scores are ranked by the faster completion time. When time runs out, your quiz is submitted automatically with every answer you selected.</li>
       </ul>
       {live ? (
@@ -408,7 +410,7 @@ function QuestionView({ state, saver }) {
       <h1 className="play-q-text">{question.question_text}</h1>
       {question.image_url && <img src={question.image_url} alt="" className="play-img" />}
       <div className="play-options" role="radiogroup" aria-label="Answer options">
-        {OPTIONS.map((l) => (
+        {optionLetters(question).map((l) => (
           <OptionTile key={l} letter={l} text={question[OPTION_FIELDS[l]]} size="lg"
             onClick={() => pick(l)} pressed={shown === l}
             disabled={locked || state.question_closed}
@@ -434,7 +436,7 @@ function ResultScreen({ result, team }) {
     <div className="play-center">
       <Trophy size={48} aria-hidden="true" className={result.qualified ? 'gold' : ''} />
       <h1 className="play-big">{result.qualified ? 'QUALIFIED!' : 'Round complete'}</h1>
-      <p>Team {team.team_number} · {team.team_name}</p>
+      <p>{team.self_joined ? team.participant_1 : `Team ${team.team_number} · ${team.team_name}`}</p>
       <div className="result-stats glass">
         <div><small>Rank</small><b>#{result.rank}</b></div>
         <div><small>Score</small><b>{formatPoints(result.points)}</b></div>

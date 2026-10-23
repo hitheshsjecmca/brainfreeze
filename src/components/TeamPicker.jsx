@@ -1,7 +1,7 @@
 import { useId, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { SECTION_LABELS } from '../lib/constants.js';
-import { filterTeams } from '../lib/teamSelection.js';
+import { filterTeams, participantNames } from '../lib/teamSelection.js';
 
 /**
  * Organiser team selection for a round (Round 1 sets, Round 2 games): a searchable list of
@@ -61,7 +61,7 @@ export default function TeamPicker({ teams, value, onChange, label = 'Registered
                 <label className="check">
                   <input type="checkbox" checked={on} disabled={disabled || !!lock || !!why} onChange={() => toggle(t)} />
                   <span>
-                    <b>{sectionFilter ? `${t.section} ` : ''}T{t.team_number}</b> {t.team_name} <small className="muted">{t.participant_1} &amp; {t.participant_2}</small>
+                    <b>{sectionFilter ? `${t.section} ` : ''}T{t.team_number}</b> {t.team_name} <small className="muted">{t.team_name === t.participant_1 && !t.participant_2 ? '' : participantNames(t)}{t.college_name ? ` · ${t.college_name}` : ''}</small>
                     {on && value.length > 1 && <span className="badge badge-muted badge-xs">#{value.indexOf(t.id) + 1}</span>}
                     {extra?.(t)}
                     {lock && <small className="muted"> — {lock}</small>}

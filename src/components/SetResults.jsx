@@ -3,6 +3,7 @@ import { AlertTriangle, Download, FileText, Search } from 'lucide-react';
 import { useQuiz } from '../context/QuizContext.jsx';
 import { Modal } from './Common.jsx';
 import { ATTEMPT_STATUS_LABELS, OPTIONS, OPTION_FIELDS } from '../lib/constants.js';
+import { participantNames } from '../lib/teamSelection.js';
 import { formatPoints, signedPoints } from '../lib/scoring.js';
 import { EVENT_TIMEZONE, formatElapsed, formatStamp } from '../lib/sets.js';
 import { completionCSV, registrationsCSV, standingsCSV, submissionAuditCSV } from '../lib/exports.js';
@@ -44,7 +45,7 @@ export default function SetResults() {
         <table className="table table-compact results-table">
           <thead>
             <tr>
-              <th scope="col">Rank</th><th scope="col">Team</th><th scope="col">Participants · college</th><th scope="col">Score</th>
+              <th scope="col">Rank</th><th scope="col">Team</th><th scope="col">Participant(s) · college · section</th><th scope="col">Score</th>
               <th scope="col">✓</th><th scope="col">✗</th><th scope="col">—</th><th scope="col">Started</th><th scope="col">Final submission</th>
               <th scope="col">Elapsed</th><th scope="col">Status</th><th scope="col">Tie</th><th scope="col"><span className="sr-only">Detail</span></th>
             </tr>
@@ -56,7 +57,7 @@ export default function SetResults() {
                 <tr key={r.team_id} className={`${r.rank <= settings.qualify_count ? 'zone' : ''} ${r.tie_review ? 'tie-flag' : ''}`}>
                   <td className="num"><b>{r.rank}</b>{r.tied && <span className="tie-mark" title="Shared rank">=</span>}</td>
                   <td><b>T{r.team_number}</b> {r.team_name}</td>
-                  <td className="small">{t ? `${t.participant_1} & ${t.participant_2}` : ''}<br /><span className="muted">{t?.college_name || ''}</span></td>
+                  <td className="small">{t ? participantNames(t) : ''} {t?.join_session_id && <span className="badge badge-muted badge-xs">self-joined</span>}<br /><span className="muted">{t?.college_name || ''}</span> <span className="badge badge-section badge-xs">{t?.section || session.section}</span></td>
                   <td className="num score">{formatPoints(r.points)}</td>
                   <td className="num ok-text">{r.correct}</td>
                   <td className="num danger-text">{r.incorrect}</td>

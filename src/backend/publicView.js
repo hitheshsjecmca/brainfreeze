@@ -12,7 +12,9 @@ export function publicQuestion(q) {
     option_a: q.option_a,
     option_b: q.option_b,
     option_c: q.option_c,
-    option_d: q.option_d,
+    option_d: q.option_d ?? null,
+    option_e: q.option_e ?? null,
+    option_f: q.option_f ?? null,
     image_url: q.image_url || null,
   };
 }

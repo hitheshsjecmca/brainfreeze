@@ -159,7 +159,7 @@ export const goBack = (step) => Math.max(0, step - 1);
 /**
  * Server calls needed to save the form as the draft:
  * { details: payload for updateQuizDetails | null, settings: payload for updateSettings | null }.
- * An empty selection cannot be stored (the server needs at least one question), so it is reported, not sent.
+ * A draft may be saved with no questions (a fresh set starts empty); publishing still needs one.
  */
 export function draftChanges(form, server) {
   const details = {};
@@ -168,14 +168,14 @@ export function draftChanges(form, server) {
   if (form.section !== server.section) details.section = form.section;
   if (!!form.self_registration !== !!server.self_registration) details.self_registration = !!form.self_registration;
   const idsChanged = form.question_ids.join() !== server.question_ids.join();
-  if (idsChanged && form.question_ids.length) details.question_ids = [...form.question_ids];
+  if (idsChanged) details.question_ids = [...form.question_ids];
   const a = rulesToSettings(form.rules);
   const b = rulesToSettings(server.rules);
   const settings = Object.fromEntries(Object.entries(a).filter(([k, v]) => v !== b[k]));
   return {
     details: Object.keys(details).length ? details : null,
     settings: Object.keys(settings).length ? settings : null,
-    emptySelection: idsChanged && !form.question_ids.length,
+    emptySelection: false, // kept for older callers: an empty selection is saved like any other
   };
 }
 
@@ -216,7 +216,8 @@ export function clearLocalDraft(storage, setId) {
 
 // ---- CSV / JSON question import
 
-export const REQUIRED_QUESTION_COLUMNS = ['question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'correct_option'];
+// option_c … option_f are optional: a question has 2 to 6 options (leave the unused ones empty).
+export const REQUIRED_QUESTION_COLUMNS = ['question_text', 'option_a', 'option_b', 'correct_option'];
 
 /** Parse an uploaded CSV or JSON question file into items. Throws an Error with a readable message. */
 export function parseQuestionFile(text, fileName = '') {
@@ -236,7 +237,7 @@ export function parseQuestionFile(text, fileName = '') {
   return items;
 }
 
-const questionKey = (q) => [q.question_text, q.option_a, q.option_b, q.option_c, q.option_d].map((v) => clean(v).toLowerCase()).join('|');
+const questionKey = (q) => [q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.option_f].map((v) => clean(v).toLowerCase()).join('|');
 
 /**
  * Check parsed rows before importing: per-row validation (line numbers), duplicates
@@ -257,7 +258,7 @@ export function checkQuestionImport(items, { bank = [] } = {}) {
     if (!seen.has(k)) seen.set(k, line);
     return {
       line, item: it, ok: v.ok, errors, duplicate, bankId: duplicate && inBank.has(k) ? inBank.get(k) : null,
-      text: v.value.question_text, key: OPTIONS.includes(v.value.correct_option) ? v.value.correct_option : null,
+      text: v.value.question_text, key: OPTIONS.slice(0, v.value.option_count).includes(v.value.correct_option) ? v.value.correct_option : null,
     };
   });
   // New bank questions to create (first copy of each), and existing bank questions to reuse.

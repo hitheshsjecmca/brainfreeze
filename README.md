@@ -3,25 +3,24 @@
 **JOSHIANA 15.0 · WINTER ARC — Round 1: MCQ Elimination Round**
 *THINK. DECODE. COMPETE.*
 
-A live quiz platform for Round 1. Teams of two register in a **section, UG or PG** (up to 50 teams per section). Organizers build any number of **quiz sets** per section. Each set has:
-- any number of questions (at least one) chosen from the shared question bank;
+A live quiz platform for Round 1. Participants join a **section, UG or PG**, simply by entering a set's join code, their full name and their college — there is no pre-registration. Organizers build any number of **quiz sets** per section. Each set has:
+- any number of questions (at least one), each with **2 to 6 answer options (A–F)**; a new set always starts empty;
 - its own timer and scoring rules;
 - its own six-digit join code once published;
 - its own team attempts, answers, results and audit trail.
 
 Answers reach the system in two ways. Both are scored in the database against the set's private answer key:
 
-1. **Team devices.** A team opens `/join` on an organizer-provided device and enters the set's code, its team number and its team PIN.
+1. **Participant devices.** A participant opens `/join`, enters the set's six-digit code (the server verifies it and shows the set's UG/PG section), then their full name and college.
    - The team reads the instructions and presses **Start**.
    - The server records the start time and the deadline (start + the set's time limit).
    - Every team gets its **own random question order and option order**, generated and stored by the server.
    - The team can **Submit quiz** early. At the deadline the attempt closes automatically.
 2. **Paper.** The organizer records answers from answer sheets on the Live Host page, as before.
 
-There are three separate consoles:
-- **Registration desk** (`/registration/login`): registration staff create, view, search and edit teams (section, team number, team name, both participants, college). A team's registration locks once that team has started a quiz. Staff **cannot** touch quiz sets, questions, answer keys, scoring, timers, attempts or results.
+There are two entry points (the former registration desk was removed in migration 17):
 - **Organizer console** (`/login`): quiz sets, publishing, going live, pause/resume, end, results, corrections, qualification and the projector reveal.
-- **Team devices** (`/join`): no accounts.
+- **Participant devices** (`/join`): no accounts; code → verified section → name + college.
 
 > **Scope:** Round 1 (COLD START) and Round 2 (MIND MELTDOWN, the host-controlled trivia board) are implemented. Round 3 (THE KNOWLEDGE AUCTION) has been removed from the application (see *Round 3 — removed* below); its migrations 13 and 14 stay in the migration history.
 
@@ -51,15 +50,13 @@ Security and backups are covered in [docs/SECURITY_AND_BACKUPS.md](docs/SECURITY
 
 ## Event flow
 
-**Registration staff (registration desk):**
-1. Sign in at `/registration/login` with a registration-staff account.
-2. **Register team** for each arriving team. Enter:
-   - the section (UG/PG);
-   - the team number (unique within the section);
-   - the team name, participant 1, participant 2 and college.
+**No registration step.** Participants identify themselves when they join (see *Participant on their device* below). Each join creates one entry for that set (name, college, the set's section) and its attempt. Registered teams can still be added on the Teams page, e.g. for paper answer sheets.
 
-   The desk shows the team's private **PIN** to hand over with its slip.
-3. Search and edit registrations. A team that has started a quiz is shown as **locked**; ask an organizer to change it. New teams can always be registered.
+**Building questions (migration 17):**
+- **Create New Quiz Set** always starts with an empty question list; nothing is copied from the bank or earlier sets.
+- **Add question** opens the editor. It shows *Questions in this set: N* and *New question — Question N+1* (or *Editing question k of N*). A question has 2–6 options (default 4): **Add Option (+)** up to F, a remove button per option down to two, and a radio to mark the one correct answer (removing the correct option clears it). The projector preview updates live and never shows the answer.
+- **Save & Next** validates, saves the question into the set and opens a clean editor; **Save Question** saves and closes; **Cancel** asks before discarding changes. A failed save keeps everything typed.
+- **Add Questions from Previous Sets** lists the other sets' questions (a published set's frozen copy), with a preview. Chosen questions are **copied** into the set as new, editable questions marked *Imported*; the originals and their sets never change, and a question already in the set (or another copy of the same original) cannot be imported twice.
 
 **Organizer:** the sidebar has five sections: **Dashboard, Rounds, Teams, Results, Settings & Backup**.
 - The **Dashboard** shows one *Next step* button, a few counts taken from real data, the event flow (Round 1 → top 5 → Round 2 → Round 2 results) and the two round cards.
@@ -92,15 +89,16 @@ Security and backups are covered in [docs/SECURITY_AND_BACKUPS.md](docs/SECURITY
    - CSV exports;
    - then tie-breaks, confirm the top 5 and **Reveal**.
 
-**Team on its device:**
-1. Open `/join` and enter the set's six-digit code. Paste works, and phones show a numeric keypad.
-2. Enter the team number and PIN from the slip.
-   - A team from the other section never works with this code.
-   - A team that already takes part in another set of its section is refused (`TEAM_IN_OTHER_SET`).
-   - If the organizer allowed walk-ins, a new team can register (including its college) and is shown its new PIN.
-3. **Instructions:** team, members, set title and instructions, number of questions, time limit, marks, and how the deadline works. **Start the quiz** appears once the organizer goes live.
-4. **Question screen:**
-   - the question in the team's own order, four options in the team's own order, and the team's countdown;
+**Participant on their device:**
+1. Open `/join` and enter the set's six-digit code. Paste works, and phones show a numeric keypad. Invalid, unpublished, ended or archived codes are refused.
+2. The page shows **Verified section: UG** (or PG), taken from the code; it cannot be changed.
+3. Enter **full name** and **college name** (both required, trimmed, max 80 / 120 characters) and press **Join quiz**.
+   - A retried request (same device, e.g. after a network error) never creates a second entry or attempt.
+   - The same name + college already signed in on another device is refused (`ALREADY_JOINED`) until an organizer presses **Release device**; then the participant resumes the same attempt and deadline.
+   - When the organizer closes registration, new participants are refused; joined ones can come back.
+4. **Waiting screen / instructions:** name, college, verified section, set title and instructions, number of questions, time limit and marks. **Start the quiz** appears once the organizer goes live (participants may join before or after Go live).
+5. **Question screen:**
+   - the question in the participant's own order, **its own 2–6 options** in their own order, and the countdown;
    - a navigator (answered questions marked — never right or wrong);
    - **Submit answer** locks one answer per question;
    - **Submit quiz** finishes early. The server records the final time.
@@ -138,9 +136,9 @@ Round 3 (THE KNOWLEDGE AUCTION) has been removed from the application: there are
 
 | Route | Who | Purpose |
 |---|---|---|
-| `/` | Everyone | Landing page with **Join quiz**, **Organizer login** and **Registration desk** |
-| `/registration/login`, `/registration` | Registration staff (and organizers) | Both sections' teams: register, search, edit, PINs, CSV. Teams that have started a quiz are locked |
-| `/join` | Teams | Set code → team sign-in (number + PIN) or walk-in registration |
+| `/` | Everyone | Landing page with **Join quiz** and **Organizer login** |
+| `/registration/*` | — | Removed (redirects home) |
+| `/join` | Participants | Set code → verified UG/PG section → full name + college |
 | `/play` | Teams | Instructions, **Start**, countdown, questions, **Submit quiz**, paused, time's up, closed, own result |
 | `/login` | Organizer | Supabase email/password (demo: labelled "Enter demo console") |
 | `/host` | Organizer | **Dashboard**: next step, event counts, event flow, round cards (no timer) |
@@ -187,14 +185,13 @@ Answers record the attempt, the **displayed** letter, the **original** option us
 
 **One set per team per section.** A team with an attempt or answers in one active set of its section cannot join, or be scored in, another (`TEAM_IN_OTHER_SET`), unless an organizer resets that attempt or archives that set.
 
-**Registration staff** are Supabase users listed in `public.registration_staff` (not in `organizers`). They can call only `registration_access`, `reg_overview` and `reg_save_team`; RLS gives them **zero rows** from every table (including `question_keys`), and every organizer RPC rejects them with `NOT_AUTHORIZED`. `reg_save_team` refuses changes once that section's quiz has started (`REGISTRATION_LOCKED`) and can never set the demo flag. Every create/edit (desk, organizer or walk-in) is written to the append-only `registration_events` log with the actor and the changed fields.
+**Registration desk (retired in migration 17).** `registration_access`, `is_registration_staff`, `reg_overview` and `reg_save_team` are no longer granted to any API role; the `registration_staff` and `registration_events` tables and their data are kept. Self-joins are logged in `registration_events` too.
 
 **Shuffling.** The device asks for a position in its own order. The server answers with that question, its options in the team's option order (no key), and a list of answered/unanswered flags. The device submits the letter it saw; the server maps it back through the stored permutation and scores the original option.
 
-**Participants have no Supabase account and no table access.** They call eight functions as the `anon` role:
+**Participants have no Supabase account and no table access.** They call seven functions as the `anon` role:
 - `join_lookup`
-- `join_team`
-- `register_team`
+- `join_quiz` (code, full name, college, request id, optional section cross-check, device label)
 - `participant_state`
 - `participant_start`
 - `participant_submit`
@@ -202,15 +199,14 @@ Answers record the attempt, the **displayed** letter, the **original** option us
 - `participant_leave`
 
 **Identity:**
-- Joining needs the active code **and** the team number **and** the team PIN.
-- Wrong team and wrong PIN return the same error, so team numbers can't be probed.
+- Joining needs an active code; the set and its section come from the code on the server (a client claiming another section is refused with `SECTION_MISMATCH`). The participant's name and college are validated on the server.
+- The join is stored as a `teams` row (`participant_1` = full name, `college_name`, `section`, `self_registered`, `join_session_id` = the set, `join_request_id`), added to the set's participants, with its attempt — so scoring, ranking, exports and Round 2 qualification work unchanged. Unique indexes make a retried request, and the same name + college in the same set, one entry.
 - Success returns a random **256-bit device token**. Only its SHA-256 hash is stored.
-- Every participant call is authorized by that token, which is bound to **one team in one quiz set**. No request parameter can name another team or attempt.
+- Every participant call is authorized by that token, which is bound to **one entry in one quiz set**. No request parameter can name another participant or attempt.
 
-**One device per team:**
-- A second device is refused while the first is active (seen in the last 45 s).
-- After 45 s of silence the PIN can move the team to a new device; the old token is revoked.
-- The organizer can also **disconnect** a device or **issue a new PIN**.
+**One device per participant:**
+- The entry stays bound to its device; another device is refused (`ALREADY_JOINED`) until an organizer **releases** it, after which the same name + college resumes the same attempt.
+- The retired PIN / roster sign-in (`join_team`, `join_registered_team`, `join_roster`, `register_team`) is no longer granted.
 
 **Registration:**
 - When registration is **closed**, new teams are refused.
@@ -260,6 +256,7 @@ Run in **filename order**. Migrations 1–3 are applied to your live project. **
 | 12 | **`20261022000100_permissions_repair.sql`** | **New.** Permissions only. Re-applies the complete function permission set (the same lists as migration 10) and checks itself: every `r2s_*` function executable by signed-in users (each still checks organizer membership inside), no organizer function executable by anon, no internal `_` helper executable by anyone. Fixes *"Round 2 could not load. This account is not authorized for this action."*, caused by an older migration (3–7 or 9) being run after migration 10: each of those revokes EXECUTE on every function and re-grants only the ones it knows, which removes the Round 2 grants. Safe to run repeatedly |
 | 13 | **`20261023000100_round3_auction.sql`** | *(Round 3 is no longer used by the app; schema and data kept.)* Round 3 THE KNOWLEDGE AUCTION: auction sets (draft topics and NORMAL/BLIND questions, answers and explanations in organizer-only tables), Publish → immutable version (a trigger refuses any UPDATE/DELETE) + one six-digit code, live auctions for exactly three registered teams of one section (one live auction per section) with a public **budget** (100) and a private **score** (0) in separate columns, server-validated bids (≥ 10, steps of 10, ≤ budget; deadline enforced), finalized bid order with organizer tie resolution, idempotent outcome confirmation (request id + one outcome per team per question) and an audit ledger. The projector board never contains scores or unrevealed topics/questions/answers. `_r2s_new_code` now also avoids Round 3 codes. Re-applies the complete function permission set (as migration 12, plus `r3s_*`) with a self-check. Safe to re-run |
 | 14 | **`20261024000100_round3_timers.sql`** | *(Round 3 is no longer used by the app; schema kept.)* Optional bidding timer: **No timer** (manual Close Bidding only) or **timed**, any 1–3600 whole seconds; timed bidding **closes automatically at the server deadline** — every organizer action and every board read (projector or control panel, including after a refresh or reconnect) first closes an expired bidding at its deadline, so it is closed even if the organizer was disconnected. An open bidding can no longer be restarted or extended (only the audited *reopen bidding* correction). Defaults: set (new sets: no timer) → auction default chosen at Start Round 3 (changeable, audited) → per-question override when bidding starts. Answer timer per auction (5–600 s). New signatures `r3s_start_session(…, p_settings jsonb)`, `r3s_start_bidding(…, p_timer jsonb)`, new `r3s_update_session_settings`; old signatures dropped; existing auctions back-filled. Re-applies the complete permission set |
+| 17 | **`20261027000100_fresh_sets_options_self_join.sql`** | **New, not applied anywhere.** Fresh sets (`create_set` starts empty; drafts may be empty), copy-imports (`previous_set_questions`, `import_set_questions`, `questions.source_question_id`), Save & Next (`save_set_question`), 2–6 options (`option_e`/`option_f`, nullable C/D, A–F checks, per-question option orders, option bounds in `participant_submit` / `record_answer` / `correct_set_question`), participant self-join (`join_quiz`, `teams.join_session_id` / `join_request_id` with unique indexes, nullable `participant_2`), `start_quiz` without pre-selected teams, retired registration-desk and PIN/roster RPCs (not granted; nothing dropped). No new tables. Re-applies the complete permission set with a self-check; safe to re-run |
 | 16 | **`20261026000100_round2_wrong_scores_zero.sql`** | **New.** Round 2 scoring: `_r2_delta` gives Right = +the question's saved points, Wrong = **0** (nothing deducted; the stored penalty is ignored; recorded results are unchanged). Re-installs `r2s_board` exactly as migration 11, so the board always carries the game's team list — a database still running migration 10's `r2s_board` returned none and the "Which Team Answered?" step blanked the page. Re-applies the complete permission set (identical to migration 15) with a self-check. No table, RLS or data changes; safe to re-run |
 
 **Round 1 participant flow (migration 9):** a team opens `/join`, enters the six-digit code, picks UG or PG, and chooses its registered team from a dropdown ("Team 12 · Team name (participant & participant)"; only teams of the set's section are listed, with no college, ids or PINs). A team stays bound to the first device that joins; another device is refused until an organizer presses **Release device** in the device monitor (the team then resumes the same attempt). The team presses **Start**: the server stores its start time and deadline, and the countdown on the quiz page is computed from that deadline, so refreshing never resets it. Tapping an option saves it on the server immediately and can be changed until **Submit Quiz** (a confirmation shows answered/unanswered counts and can be cancelled). When the deadline passes, the server times the attempt out with every saved answer, even if the device is offline; later answers are refused. Live Host shows only Go live, End set, the projector controls and the device monitor; pause, paper answer entry and corrections are in the folded **Emergency & paper answers** section. The older PIN sign-in (`join_team`) remains callable for older clients but the app no longer uses it.
@@ -383,16 +380,15 @@ npm run test:e2e:round2         # Round 2: setup, projector window, hidden tile,
                                 # confirmation, cancel, double click, reload, expiry, close without points, score log (25 checks)
 ```
 
-**Try the full flow locally in demo mode** (registration desk, one organizer, two simulated teams):
+**Try the full flow locally in demo mode** (one organizer, two simulated participants):
 1. Run `npm run dev:demo`.
-2. **Registration desk:** open <http://localhost:5173/registration/login> → **Enter demo registration desk**. Register a team and note its PIN.
-3. **Create a set:** open <http://localhost:5173/login> → **Enter demo console**. Go to **Rounds → Open Round 1 → Quiz sets → New quiz set**, enter a title, choose UG and press **Next**.
-4. **Publish it:** on **Set setup & join**, adjust the questions and the time limit, check the ranking rules, then **Publish set**. Note the code, and click **Show PINs**.
-5. **Team 1:** open a **new tab** at <http://localhost:5173/join>. Enter the code, team **1** and its PIN, then **Sign in team**. The tab shows the instructions.
-6. **Team 2:** open another **new tab** and repeat with team **2**. You can press F12 and use the device toolbar to see the phone layout.
-7. **Go live:** in the organizer tab, go to **Live host → Go live**. In each team tab press **Start the quiz**. The two tabs show different question and option orders and their own countdowns.
-8. **Answer and submit:** answer a few questions and press **Submit quiz** in one tab. Reload the other tab: same question, same countdown.
-9. **Organizer controls:** try **Pause all / Resume**, **Results** (times, status, attempt detail, CSVs), **End set**, then the **Dashboard** and **Teams** statuses.
+2. **Create a set:** open <http://localhost:5173/login> → **Enter demo console**. Go to **Rounds → Open Round 1 → Quiz sets → New quiz set**, enter a title, choose UG and press **Next**. The set starts empty: add questions (or **Add Questions from Previous Sets**).
+3. **Publish it:** on **Set setup & join**, check the questions and the time limit, then **Publish set**. Note the code.
+4. **Participant 1:** open a **new tab** at <http://localhost:5173/join>. Enter the code, check the verified section, enter a full name and college, then **Join quiz**. The tab shows the waiting screen.
+5. **Participant 2:** open another **new tab** and repeat with a different name. You can press F12 and use the device toolbar to see the phone layout.
+6. **Go live:** in the organizer tab, go to **Live host → Go live**. In each participant tab press **Start the quiz**. The two tabs show different question and option orders and their own countdowns.
+7. **Answer and submit:** answer a few questions and press **Submit quiz** in one tab. Reload the other tab: same question, same countdown.
+8. **Organizer controls:** try **Pause all / Resume**, **Results** (times, status, attempt detail, CSVs), **End set**, then the **Dashboard** and **Teams** statuses.
 10. **Second set:** create a second UG set. Team 1 is refused there (one set per section).
 
 Demo state is shared between tabs **of one browser only**. Each tab keeps its own team identity and its own selected set.
@@ -499,7 +495,7 @@ git push -u origin main
 2. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
 3. If they're missing, the deployed site shows **"Configuration required"** instead of an open demo.
 
-`vercel.json` routes every page (`/join`, `/play`, `/registration/*`, `/host/*`, …) to the app and sets security headers.
+`vercel.json` routes every page (`/join`, `/play`, `/host/*`, …) to the app and sets security headers (the retired `/registration/*` links redirect home).
 
 ---
 
@@ -614,12 +610,14 @@ The quiz-set browser test covers:
 - **Team devices are always self-paced.** The old organizer-paced device mode (every team answering the projector question) was replaced by per-team attempts and timers. The projector shows the set's code, progress, leaderboard and reveal; paper entry by question still works on Live Host.
 - **One device per team, one answer per question, one set per team per section.** Corrections stay organizer-only; a retake needs an organizer **Reset attempt**.
 - **Sets share one question bank.** A published set keeps a frozen copy; bank questions used by a published (non-archived) set cannot be deleted or replaced by import until that set is archived.
-- **The set wizard edits shared bank questions.** Editing a question in the wizard changes it for every draft that uses it (published sets keep their frozen copy). A new draft starts with the whole bank selected (the server's "no selection yet" meaning), which the organizer can trim in step 2; an empty selection can't be saved, only edited locally until questions are added.
+- **Questions written in a set live in the shared bank.** New sets start empty and imports are copies, so editing never changes another set; older drafts created before migration 17 may still share bank questions (or have no list, meaning the whole bank).
+- **Self-joined participants are identified by name + college, not a secret.** Someone who knows a released participant's name and college could resume that attempt; organizers should release devices only for the person in front of them. Two different people with the same name from the same college must add something to tell them apart (e.g. a middle initial).
+- **Removing questions or reordering them in the wizard** is saved with *Save draft* / *Next* (new questions and imports are saved immediately).
+- **The older e2e scripts** (`scripts/e2e-demo.mjs`, `e2e-sets.mjs`, `e2e-round2.mjs`) still drive the retired registration desk / team-list join and need updating; `scripts/e2e-fresh-join.mjs` covers the new flow.
 - **Published keys can still be corrected** with the audited **Correct key** action (it re-scores recorded answers and is logged); the questions themselves can't be edited once published.
 - **Sets published before migration 6** have no frozen copy until they are published again.
 - **Set selection is per browser tab** (sessionStorage). Two organizers can run different sets in parallel tabs; each tab's actions touch only its own set.
-- **Registration staff see team PINs** (they hand them out). Treat desk accounts like organizer accounts.
-- **Demo mode has no accounts**, so in demo the registration desk and organizer console are both open in the same browser.
+- **Demo mode has no accounts**, so in demo the organizer console is open in the browser.
 - **Rate limiting is keyed by client IP.** At a venue where all devices share one public IP, 30 failed attempts in 10 minutes from that network trigger a temporary block. Tell teams to type carefully; the organizer can still record answers manually.
 - **"Connected" is inferred** from device check-ins (every 10 s or more). A quiet device shows "last seen", never "withdrawn".
 - **Participant updates arrive by polling** (about 2 s), with an optional instant broadcast signal. Deadlines do not depend on either.

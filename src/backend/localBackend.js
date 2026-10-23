@@ -213,20 +213,10 @@ export const localBackend = {
     },
   },
 
-  // Registration desk (demo: no accounts, so the desk is always available here).
-  registration: {
-    access: async () => ({ staff: true, organizer: true }),
-    overview: () => apply('regOverview', {}),
-    saveTeam: (p) => apply('regSaveTeam', p, { role: 'registration' }),
-  },
-
   // Participant API (same shapes as the Supabase participant functions).
   participant: {
     lookup: (code) => apply('joinLookup', { code }),
-    roster: (p) => apply('joinRoster', p),
-    joinRegistered: (p) => apply('joinRegisteredTeam', p),
-    joinTeam: (p) => apply('joinTeam', p),
-    registerTeam: (p) => apply('registerTeam', p),
+    joinQuiz: (p) => apply('joinQuiz', p),
     state: (token, position = null) => apply('participantState', { token, position }),
     start: (token) => apply('participantStart', { token }),
     submit: (p) => apply('participantSubmit', p),

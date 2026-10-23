@@ -15,12 +15,12 @@ export function standingsCSV(standings, { qualifiers = null, provisional = true,
   const byId = new Map(teams.map((t) => [t.id, t]));
   const limit = settings ? settings.duration_seconds * 1000 : null;
   return toCSV(
-    [...SET_HEAD, 'rank', 'team_number', 'team_name', 'participant_1', 'participant_2', 'college', 'total_score', 'correct', 'incorrect', 'unanswered',
+    [...SET_HEAD, 'rank', 'team_number', 'team_name', 'participant_1', 'participant_2', 'college', 'participant_section', 'total_score', 'correct', 'incorrect', 'unanswered',
       'attempt_status', 'started_at_utc', 'finished_at_utc', 'elapsed_ms', 'elapsed', 'time_limit', 'tie_review', 'tiebreak_result', 'status'],
     standings.map((r) => {
       const t = byId.get(r.team_id);
       return [
-        ...setCols(set), r.rank, r.team_number, r.team_name, t?.participant_1 ?? '', t?.participant_2 ?? '', t?.college_name ?? '',
+        ...setCols(set), r.rank, r.team_number, r.team_name, t?.participant_1 ?? '', t?.participant_2 ?? '', t?.college_name ?? '', t?.section ?? set?.section ?? '',
         r.points, r.correct, r.incorrect, r.unanswered,
         ATTEMPT_STATUS_LABELS[r.attempt_status || 'none'] || r.attempt_status || '', r.started_at ?? '', r.finished_at ?? '',
         r.elapsed_ms ?? '', formatElapsed(r.elapsed_ms), limit ? formatElapsed(limit) : '',
@@ -35,7 +35,7 @@ export function standingsCSV(standings, { qualifiers = null, provisional = true,
 export function registrationsCSV(teams) {
   return toCSV(
     ['section', 'team_number', 'team_name', 'participant_1', 'participant_2', 'college', 'self_registered', 'registered_at_utc'],
-    teams.map((t) => [t.section, t.team_number, t.team_name, t.participant_1, t.participant_2, t.college_name ?? '', t.self_registered ? 'yes' : 'no', t.created_at ?? '']),
+    teams.map((t) => [t.section, t.team_number, t.team_name, t.participant_1, t.participant_2 ?? '', t.college_name ?? '', t.self_registered ? 'yes' : 'no', t.created_at ?? '']),
   );
 }
 

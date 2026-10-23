@@ -3,7 +3,7 @@
 // the order never changes on refresh or reconnect; the shown letter always maps
 // back to the original option, so scoring is correct for every arrangement.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { asRole, createDb, ORG, selectTeams } from './helpers/db.js';
+import { asRole, createDb, joinQuiz, joinedTeam, ORG } from './helpers/db.js';
 
 let db;
 let n = 0;
@@ -13,8 +13,7 @@ const org = async (fn, args = [], set = null) =>
   (await asRole(db, 'authenticated', ORG, `select public.${fn}(${ph(args)}) as r`, args, set ? { 'x-brainfreze-set': set } : null)).rows[0].r;
 const anon = async (fn, args = [], ip = '10.6.0.1') =>
   (await asRole(db, 'anon', null, `select public.${fn}(${ph(args)}) as r`, args, { 'x-forwarded-for': ip })).rows[0].r;
-const team = (num) => ({ team_number: num, team_name: `Shuffle ${num}`, participant_1: 'A', participant_2: 'B', college_name: 'X', section: 'UG' });
-const teamId = async (num) => (await db.query(`select id from public.teams where section = 'UG' and team_number = $1`, [num])).rows[0].id;
+const teamId = async (num) => (await joinedTeam(db, set, `Shuffle ${num}`)).id;
 const attemptOf = async (num) => (await db.query(`select * from public.quiz_attempts where session_id = $1 and team_id = $2 and status <> 'reset'`, [set, await teamId(num)])).rows[0];
 const results = async () => (await asRole(db, 'authenticated', ORG, 'select * from public.get_set_results()', [], { 'x-brainfreze-set': set })).rows;
 const KEY_WORDS = /correct_option|explanation|"result"|"points"|SECRET/;
@@ -36,12 +35,10 @@ beforeAll(async () => {
   }));
   await org('import_questions', [items, false, false]);
   bank = (await db.query('select q.id, q.option_a, q.option_b, q.option_c, q.option_d, k.correct_option from public.questions q join public.question_keys k on k.question_id = q.id order by q.position')).rows;
-  for (const i of TEAMS) await org('save_team', [team(i)]);
   set = await org('create_set', [{ name: 'Shuffle set', section: 'UG' }]);
   await org('update_quiz_details', [{ question_ids: bank.map((q) => q.id) }], set);
   const code = (await org('publish_quiz', [], set)).join_code;
-  await selectTeams(db, set);
-  for (const i of TEAMS) tok[i] = (await anon('join_registered_team', [code, 'UG', i, null], `10.6.1.${i}`)).token;
+  for (const i of TEAMS) tok[i] = (await joinQuiz(db, code, `Shuffle ${i}`, 'X College', { ip: `10.6.1.${i}` })).token;
   await org('start_quiz', [], set);
   for (const i of TEAMS) await anon('participant_start', [tok[i]], `10.6.1.${i}`);
 }, 90_000);
@@ -82,7 +79,7 @@ describe('per-team shuffling (SQL)', () => {
     expect(await view()).toEqual(first); // refresh
     await org('revoke_participant', [await teamId(3)], set); // device replaced: join again
     const code = (await db.query('select join_code from public.quiz_sessions where id = $1', [set])).rows[0].join_code;
-    tok[3] = (await anon('join_registered_team', [code, 'UG', 3, 'replacement'], '10.6.1.3')).token;
+    tok[3] = (await joinQuiz(db, code, 'Shuffle 3', 'X College', { ip: '10.6.1.3', device: 'replacement' })).token;
     expect(await view()).toEqual(first);
     const after = await attemptOf(3);
     expect(after.question_order).toEqual(before.question_order);
@@ -123,7 +120,7 @@ describe('per-team shuffling (SQL)', () => {
       }
     }
     const rows = await results();
-    const row = (num) => rows.find((r) => r.team_number === num);
+    const row = (num) => rows.find((r) => r.team_name === `Shuffle ${num}`);
     for (const i of [5, 6]) expect([row(i).correct, row(i).incorrect, Number(row(i).points)]).toEqual([30, 0, 30]);
     expect([row(7).correct, row(7).incorrect, Number(row(7).points)]).toEqual([0, 30, -7.5]);
   });

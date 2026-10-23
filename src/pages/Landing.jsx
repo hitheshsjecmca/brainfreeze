@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ClipboardCheck, GraduationCap, Lock, LogIn, Monitor, UserRound, Users, UsersRound } from 'lucide-react';
+import { GraduationCap, Lock, LogIn, Monitor, UserRound, Users, UsersRound } from 'lucide-react';
 import { BrandMark } from '../components/Brand.jsx';
 import { ModeBadge } from '../components/Common.jsx';
 import { FrostBackdrop } from '../components/Snowfall.jsx';
@@ -7,7 +7,7 @@ import { isDemoMode } from '../backend/index.js';
 
 const FACTS = [
   { icon: Users, title: 'UG & PG', text: 'Teams participate in Undergraduate (UG) and Postgraduate (PG) sections.' },
-  { icon: UsersRound, title: 'Teams of Two', text: 'Each team consists of two participants.' },
+  { icon: UsersRound, title: 'Join With a Code', text: 'Enter the six-digit code, your name and your college — no pre-registration.' },
   { icon: Monitor, title: 'Official Devices', text: 'One organizer-provided device per team — or answers on paper.' },
 ];
 
@@ -35,7 +35,6 @@ export default function Landing() {
           <nav className="landing-cta" aria-label="Get started">
             <Link to="/join" className="btn btn-primary btn-lg"><LogIn size={18} /> Join Quiz</Link>
             <Link to="/login" className="btn btn-ghost btn-lg landing-btn-dark"><Lock size={18} /> Organizer Login</Link>
-            <Link to="/registration/login" className="btn btn-ghost btn-lg landing-btn-dark"><ClipboardCheck size={18} /> Registration Desk</Link>
           </nav>
         </section>
 

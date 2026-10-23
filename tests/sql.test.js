@@ -137,7 +137,8 @@ describe('quiz flow through RPCs', () => {
     const filler = Array.from({ length: 26 }, (_, i) => ({ question_text: `Filler ${i + 1}?`, option_a: 'w', option_b: 'x', option_c: 'y', option_d: 'z', correct_option: 'A' }));
     await rpc('import_questions', [filler, false, false]);
     await rpc('publish_quiz');
-    expect(await code(rpc('start_quiz'))).toBe('QUIZ_NO_TEAMS'); // the organiser must select the participants first
+    // Going live no longer needs pre-selected teams (participants join themselves); here the organizer adds
+    // registered teams for paper answer entry before going live.
     await org("select public.set_set_teams((select id from public.quiz_sessions where is_current and section = 'UG' order by created_at desc limit 1), array(select id from public.teams where section = 'UG'))");
     await rpc('start_quiz');
     expect(await code(rpc('update_settings', [{ marks_correct: 3 }]))).toBe('SET_FROZEN');

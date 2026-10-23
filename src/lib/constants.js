@@ -22,8 +22,12 @@ export const ATTEMPT_STATUS_LABELS = {
 };
 export const SECTION_LABELS = { UG: 'UG (undergraduate)', PG: 'PG (postgraduate)' };
 
-export const OPTIONS = ['A', 'B', 'C', 'D'];
-export const OPTION_FIELDS = { A: 'option_a', B: 'option_b', C: 'option_c', D: 'option_d' };
+// A question has 2 to 6 options, A–F, without gaps (new questions start with 4).
+export const OPTIONS = ['A', 'B', 'C', 'D', 'E', 'F'];
+export const OPTION_FIELDS = { A: 'option_a', B: 'option_b', C: 'option_c', D: 'option_d', E: 'option_e', F: 'option_f' };
+export const MIN_OPTIONS = 2;
+export const MAX_OPTIONS = 6;
+export const DEFAULT_OPTION_COUNT = 4;
 
 export const MAX_TEAM_NUMBER = 99999; // team numbers 1–99999 (numbering format, not a team limit; no cap per section)
 

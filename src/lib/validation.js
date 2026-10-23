@@ -1,4 +1,5 @@
-import { MAX_DURATION_SECONDS, MAX_TEAM_NUMBER, OPTIONS, OPTION_FIELDS, SECTIONS } from './constants.js';
+import { MAX_DURATION_SECONDS, MAX_OPTIONS, MAX_TEAM_NUMBER, MIN_OPTIONS, OPTIONS, OPTION_FIELDS, SECTIONS } from './constants.js';
+import { optionCount } from './options.js';
 
 const clean = (v) => (v === null || v === undefined ? '' : String(v).replace(/\s+/g, ' ').trim());
 const optionalNumber = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
@@ -9,7 +10,7 @@ export function normalizeTeam(input, defaultSection = 'UG') {
     team_number: Number(String(input.team_number ?? '').trim()),
     team_name: clean(input.team_name),
     participant_1: clean(input.participant_1),
-    participant_2: clean(input.participant_2),
+    participant_2: clean(input.participant_2) || null,
     college_name: clean(input.college_name) || null,
     is_demo: !!input.is_demo,
   };
@@ -19,8 +20,9 @@ export function normalizeTeam(input, defaultSection = 'UG') {
  * Returns { value, errors } — errors is an object keyed by field.
  * Team numbers are unique and capacity is counted WITHIN a section; pass all
  * teams (any section) as existingTeams. requireCollege is off only for old backups.
+ * A self-joined participant (join_session_id set) is one person: participant_2 is optional for it.
  */
-export function validateTeam(input, existingTeams = [], editingId = null, { requireCollege = true, defaultSection = 'UG' } = {}) {
+export function validateTeam(input, existingTeams = [], editingId = null, { requireCollege = true, defaultSection = 'UG', requirePartner = !input.join_session_id } = {}) {
   const value = normalizeTeam(input, defaultSection);
   const errors = {};
   const same = existingTeams.filter((t) => (t.section || 'UG') === value.section && t.id !== editingId);
@@ -33,7 +35,7 @@ export function validateTeam(input, existingTeams = [], editingId = null, { requ
   if (!value.team_name) errors.team_name = 'Team name is required.';
   else if (value.team_name.length > 80) errors.team_name = 'Team name must be 80 characters or fewer.';
   for (const f of ['participant_1', 'participant_2']) {
-    if (!value[f]) errors[f] = 'Both participants are required (teams have exactly two members).';
+    if (!value[f]) { if (f === 'participant_1' || requirePartner) errors[f] = 'Both participants are required (teams have exactly two members).'; }
     else if (value[f].length > 80) errors[f] = 'Name must be 80 characters or fewer.';
   }
   if (requireCollege && !value.college_name) errors.college_name = 'College name is required.';
@@ -41,13 +43,16 @@ export function validateTeam(input, existingTeams = [], editingId = null, { requ
   return { value, errors, ok: Object.keys(errors).length === 0 };
 }
 
+/**
+ * Normalize a question. `option_count` (2–6) decides which options are active; without it, the options up to the
+ * last filled one are. Options after the count are dropped (null), so removed options are never saved.
+ */
 export function normalizeQuestion(input) {
+  const count = optionCount(input);
   const value = {
     question_text: clean(input.question_text),
-    option_a: clean(input.option_a),
-    option_b: clean(input.option_b),
-    option_c: clean(input.option_c),
-    option_d: clean(input.option_d),
+    ...Object.fromEntries(OPTIONS.map((l, i) => [OPTION_FIELDS[l], i < count ? clean(input[OPTION_FIELDS[l]]) : null])),
+    option_count: count,
     correct_option: clean(input.correct_option).toUpperCase(),
     explanation: clean(input.explanation) || null,
     image_url: clean(input.image_url) || null,
@@ -62,12 +67,18 @@ export function normalizeQuestion(input) {
 export function validateQuestion(input) {
   const value = normalizeQuestion(input);
   const errors = {};
+  const letters = OPTIONS.slice(0, value.option_count);
   if (!value.question_text) errors.question_text = 'Question text is required.';
   else if (value.question_text.length > 1000) errors.question_text = 'Question text must be 1000 characters or fewer.';
+  const requested = Number(input.option_count);
+  if (input.option_count !== undefined && input.option_count !== null && input.option_count !== ''
+    && !(Number.isInteger(requested) && requested >= MIN_OPTIONS && requested <= MAX_OPTIONS)) {
+    errors.option_count = `A question has ${MIN_OPTIONS} to ${MAX_OPTIONS} options.`;
+  }
   const seen = new Map();
-  for (const letter of OPTIONS) {
+  for (const letter of letters) {
     const f = OPTION_FIELDS[letter];
-    if (!value[f]) errors[f] = `Option ${letter} is required.`;
+    if (!value[f]) errors[f] = `Option ${letter} is required — enter its text or remove it.`;
     else if (value[f].length > 300) errors[f] = `Option ${letter} must be 300 characters or fewer.`;
     else {
       const k = value[f].toLowerCase();
@@ -75,7 +86,7 @@ export function validateQuestion(input) {
       else seen.set(k, letter);
     }
   }
-  if (!OPTIONS.includes(value.correct_option)) errors.correct_option = 'Choose exactly one correct answer (A–D).';
+  if (!letters.includes(value.correct_option)) errors.correct_option = `Choose exactly one correct answer (A–${letters[letters.length - 1]}).`;
   if (value.image_url && !/^https:\/\//i.test(value.image_url) && !/^data:image\/(png|jpe?g|gif|webp);base64,/i.test(value.image_url)) {
     errors.image_url = 'Image must be an https:// URL (or an uploaded image in demo mode).';
   } else if (value.image_url && value.image_url.length > 700000) {
@@ -114,10 +125,9 @@ export function validateSettings(input) {
   return { value, errors, ok: Object.keys(errors).length === 0 };
 }
 
-/** Issues that block starting the quiz. Mirrors public.start_quiz checks. */
-export function quizReadinessIssues({ teams, questions }) {
+/** Issues that block starting the quiz. Mirrors public.start_quiz checks (participants join themselves, so no teams are needed). */
+export function quizReadinessIssues({ questions }) {
   const issues = [];
-  if (teams.length === 0) issues.push('Add at least one team.');
   if (questions.length === 0) issues.push('Add at least one question.');
   questions.forEach((q, i) => {
     const { ok, errors } = validateQuestion(q);

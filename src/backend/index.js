@@ -16,4 +16,3 @@ export const backend = resolved.mode === 'supabase' ? supabaseBackend : localBac
 export const isDemoMode = resolved.mode === 'demo';
 export const configProblem = resolved.error;
 export const participantApi = backend.participant;
-export const registrationApi = backend.registration;

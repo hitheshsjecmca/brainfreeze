@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, Check, CheckCircle2, Copy, Download, Eye, EyeOff, FileUp, Library, ListChecks,
+  AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, Check, CheckCircle2, Copy, Download, Eye, EyeOff, FileUp, History, ListChecks, Loader2,
   MonitorPlay, Pencil, Plus, RotateCcw, Rocket, Save, Search, Settings2, ArrowUp, Trash2, X,
 } from 'lucide-react';
 import { useQuiz } from '../context/QuizContext.jsx';
@@ -9,7 +9,10 @@ import { useUI } from '../context/UIContext.jsx';
 import { Field, Modal } from './Common.jsx';
 import { OptionGrid } from './QuizBits.jsx';
 import { QuestionEditor } from '../pages/Questions.jsx';
-import { OPTIONS, OPTION_FIELDS, SECTIONS, SECTION_LABELS } from '../lib/constants.js';
+import { OPTIONS, OPTION_FIELDS, SECTIONS, SECTION_LABELS, SET_STAGE_LABELS } from '../lib/constants.js';
+import { optionLetters } from '../lib/options.js';
+import { backend } from '../backend/index.js';
+import { toQuizError } from '../lib/errors.js';
 import { questionTemplateCSV } from '../lib/csv.js';
 import { downloadText, readFileText } from '../lib/download.js';
 import { formatJoinCode, joinUrl } from '../lib/joinCodes.js';
@@ -87,7 +90,6 @@ function DetailsStep({ form, setForm, showErrors, sectionLocked }) {
           <Field label="Instructions shown to teams before they start" error={errors.description}>
             <textarea rows={2} value={form.description} onChange={set('description')} maxLength={500} />
           </Field>
-          <label className="check"><input type="checkbox" checked={!!form.self_registration} onChange={set('self_registration')} /> Allow walk-in teams to self-register with the join code</label>
         </div>
       </details>
     </div>
@@ -116,7 +118,7 @@ function QuestionsStep({ form, setForm }) {
   const bankById = useMemo(() => new Map(bank.map((q) => [q.id, q])), [bank]);
   const [editing, setEditing] = useState(null);
   const [preview, setPreview] = useState(null);
-  const [picking, setPicking] = useState(false);
+  const [importingPrev, setImportingPrev] = useState(false);
   const [importing, setImporting] = useState(null);
   const [pendingImport, setPendingImport] = useState(null);
   const [showOptions, setShowOptions] = useState(false);
@@ -173,7 +175,7 @@ function QuestionsStep({ form, setForm }) {
       <CountMeter n={ids.length} />
       <div className="toolbar wz-toolbar">
         <button type="button" className="btn btn-primary btn-sm" onClick={() => setEditing({})}><Plus size={16} /> Add question</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPicking(true)}><Library size={16} /> Choose from bank ({bank.length})</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setImportingPrev(true)}><History size={16} /> Add Questions from Previous Sets</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()}><FileUp size={16} /> Import CSV</button>
         <input ref={fileRef} type="file" accept=".csv,.json,text/csv,application/json" hidden onChange={onFile} aria-label="Question CSV file" />
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => downloadText('brainfreze-questions-template.csv', questionTemplateCSV(), 'text/csv')}><Download size={16} /> CSV template</button>
@@ -187,7 +189,7 @@ function QuestionsStep({ form, setForm }) {
       {pendingImport && <p className="muted small" role="status">Adding the imported questions…</p>}
 
       {ids.length === 0 ? (
-        <div className="state-box"><ListChecks size={28} /><h3>No questions in this set yet</h3><p className="muted">Add questions one by one, choose them from the question bank, or import a CSV file.</p></div>
+        <div className="state-box"><ListChecks size={28} /><h3>No questions in this set yet</h3><p className="muted">This set starts empty. Add questions one by one (Save &amp; Next keeps the editor open), copy questions from previous sets, or import a CSV file.</p></div>
       ) : (
         <ol className="wz-qlist">
           {ids.map((id, i) => {
@@ -200,7 +202,9 @@ function QuestionsStep({ form, setForm }) {
                   <p className="wz-qtext">{q ? q.question_text : <i className="danger-text">Question no longer in the bank — remove it</i>}</p>
                   {q && (
                     <span className="wz-qmeta">
-                      {OPTIONS.includes(q.correct_option) ? <span className="badge badge-ok badge-xs">Answer {q.correct_option}</span> : <span className="badge badge-danger badge-xs">NO ANSWER</span>}
+                      {q.source_question_id ? <span className="badge badge-import badge-xs" title="Copied from a previous set; editing it never changes the original">Imported</span> : <span className="badge badge-new badge-xs">New</span>}
+                      {optionLetters(q).includes(q.correct_option) ? <span className="badge badge-ok badge-xs">Answer {q.correct_option}</span> : <span className="badge badge-danger badge-xs">NO ANSWER</span>}
+                      <span className="badge badge-muted badge-xs">{optionLetters(q).length} options</span>
                       {q.category && <span className="badge badge-muted badge-xs">{q.category}</span>}
                       {q.is_sample && <span className="badge badge-amber badge-xs">SAMPLE</span>}
                       {(q.marks_correct != null || q.marks_incorrect != null) && <span className="badge badge-purple badge-xs">own marks</span>}
@@ -209,7 +213,7 @@ function QuestionsStep({ form, setForm }) {
                   )}
                   {q && showOptions && (
                     <ul className="q-options wz-qopts">
-                      {OPTIONS.map((l) => <li key={l} className={q.correct_option === l ? 'is-key' : ''}><b>{l}</b> {q[OPTION_FIELDS[l]]}</li>)}
+                      {optionLetters(q).map((l) => <li key={l} className={q.correct_option === l ? 'is-key' : ''}><b>{l}</b> {q[OPTION_FIELDS[l]]}</li>)}
                     </ul>
                   )}
                 </div>
@@ -225,14 +229,15 @@ function QuestionsStep({ form, setForm }) {
           })}
         </ol>
       )}
-      <p className="muted small">Each team gets these questions in its own random order with shuffled options; answers are never sent to team devices. Questions live in the shared question bank — editing one here also changes it for other drafts that use it. Published sets keep their own frozen copy.</p>
+      <p className="muted small">Each participant gets these questions in their own random order with shuffled options; answers are never sent to participant devices. Imported questions are copies: editing them never changes the previous set. Published sets keep their own frozen copy.</p>
 
       {editing && (
-        <QuestionEditor question={editing} isDemo={isDemo} hasAnswers={false} onClose={() => setEditing(null)}
-          onSaved={(id) => { if (!editing.id && id) add([id], null); }} />
+        <QuestionEditor question={editing} isDemo={isDemo} hasAnswers={false} onClose={() => setEditing(null)} saveAction="saveSetQuestion"
+          savedCount={ids.length} numberOf={(q) => ids.indexOf(q.id) + 1} noun="this set"
+          onSaved={(id, _r, { isNew }) => { if (isNew && id) add([id], null); }} />
       )}
       {preview && <PreviewModal {...preview} onClose={() => setPreview(null)} />}
-      {picking && <BankPicker bank={bank} selected={ids} onChange={(next) => setIds(() => next)} onClose={() => setPicking(false)} />}
+      {importingPrev && <ImportFromSets ids={ids} bankById={bankById} onImported={(newIds) => add(newIds, null)} onClose={() => setImportingPrev(false)} />}
       {importing && <ImportDialog data={importing} bank={bank} onImport={runImport} onClose={() => setImporting(null)} />}
     </div>
   );
@@ -244,48 +249,122 @@ function PreviewModal({ q, n, onClose }) {
       <div className="preview-frame">
         <p className="preview-q">{q.question_text}</p>
         {q.image_url && <img src={q.image_url} alt="" className="preview-img" />}
-        <OptionGrid question={q} size="sm" keyLetter={OPTIONS.includes(q.correct_option) ? q.correct_option : null} />
+        <OptionGrid question={q} size="sm" keyLetter={optionLetters(q).includes(q.correct_option) ? q.correct_option : null} />
       </div>
       <p className="muted small">Organizer preview: the correct answer ({q.correct_option || 'none'}) is highlighted here only. Teams see the options in their own shuffled order without any answer.</p>
     </Modal>
   );
 }
 
-function BankPicker({ bank, selected, onChange, onClose }) {
+/**
+ * "Add Questions from Previous Sets": browse the other sets' questions, preview them and pick individual ones.
+ * Importing COPIES them into this draft (new, editable questions); the originals and their sets never change.
+ * Questions already in this draft (or another copy of the same original) cannot be picked again.
+ */
+function ImportFromSets({ ids, bankById, onImported, onClose }) {
+  const { setId, act } = useQuiz();
+  const [state, setState] = useState({ loading: true, error: null, sets: [] });
+  const [chosen, setChosen] = useState(() => new Map()); // question_id -> set_id
   const [filter, setFilter] = useState('');
-  const [category, setCategory] = useState('');
-  const [onlyFree, setOnlyFree] = useState(false);
-  const chosen = new Set(selected);
-  const categories = [...new Set(bank.map((q) => q.category).filter(Boolean))].sort();
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setState({ loading: true, error: null, sets: [] });
+    try {
+      const sets = await backend.call('previousSetQuestions', {}, { setId });
+      setState({ loading: false, error: null, sets: Array.isArray(sets) ? sets : [] });
+    } catch (e) {
+      setState({ loading: false, error: toQuizError(e), sets: [] });
+    }
+  }, [setId]);
+  useEffect(() => { load(); }, [load]);
+
+  // Originals already represented in this draft (the question itself or a copy of it).
+  const inDraft = useMemo(() => {
+    const s = new Set(ids);
+    for (const id of ids) { const src = bankById.get(id)?.source_question_id; if (src) s.add(src); }
+    return s;
+  }, [ids, bankById]);
+  const already = (q) => inDraft.has(q.question_id) || (q.source_question_id && inDraft.has(q.source_question_id));
   const f = filter.trim().toLowerCase();
-  const visible = bank.filter((q) => (!category || q.category === category) && (!onlyFree || !chosen.has(q.id)) && (!f || q.question_text.toLowerCase().includes(f)));
-  const toggle = (id) => onChange(chosen.has(id) ? selected.filter((x) => x !== id) : addToSelection(selected, [id]).ids);
+  const shown = state.sets.map((x) => ({ ...x, questions: x.questions.filter((q) => !f || q.question_text.toLowerCase().includes(f) || (q.category || '').toLowerCase().includes(f)) }))
+    .filter((x) => x.questions.length);
+  const toggle = (q, setIdOf) => setChosen((m) => {
+    const n = new Map(m);
+    if (n.has(q.question_id)) n.delete(q.question_id); else n.set(q.question_id, setIdOf);
+    return n;
+  });
+  const pickAll = (x) => setChosen((m) => {
+    const n = new Map(m);
+    for (const q of x.questions) if (!already(q) && !n.has(q.question_id)) n.set(q.question_id, x.set_id);
+    return n;
+  });
+
+  async function run() {
+    if (!chosen.size || busy) return;
+    setBusy(true);
+    try {
+      const items = [...chosen].map(([question_id, set_id]) => ({ set_id, question_id }));
+      const res = await act('importSetQuestions', { items }, {
+        key: 'importSetQuestions', errorTitle: 'Questions not imported',
+        success: 'Questions imported',
+        successDetail: (r) => `${r.imported} copied into this set${r.skipped ? ` · ${r.skipped} skipped (already in this set)` : ''}`,
+      });
+      if (res.ok) { onImported(res.result?.ids || []); onClose(); }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <Modal title="Choose from the question bank" onClose={onClose} labelledBy="wz-bank" wide>
+    <Modal title="Add Questions from Previous Sets" onClose={onClose} labelledBy="wz-prev" wide>
+      <p className="muted small">Selected questions are <b>copied</b> into this set. You can edit the copies; the original questions and their sets stay unchanged.</p>
       <div className="toolbar">
-        <label className="search"><Search size={14} aria-hidden="true" /><input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter…" aria-label="Filter bank questions" /></label>
-        <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category"><option value="">All categories</option>{categories.map((c) => <option key={c}>{c}</option>)}</select>
-        <label className="check"><input type="checkbox" checked={onlyFree} onChange={(e) => setOnlyFree(e.target.checked)} /> Not in this set</label>
-        <button type="button" className="btn btn-ghost btn-sm" disabled={!visible.length} onClick={() => onChange(addToSelection(selected, visible.map((q) => q.id)).ids)}><Plus size={14} /> Add all shown</button>
+        <label className="search"><Search size={14} aria-hidden="true" /><input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter questions…" aria-label="Filter previous questions" /></label>
+        <span className="badge badge-ice" role="status">{chosen.size} selected</span>
       </div>
-      <CountMeter n={selected.length} />
-      {bank.length === 0 ? <p className="muted">The question bank is empty. Add or import questions first.</p> : (
-        <ul className="q-pick-list wz-bank">
-          {visible.map((q) => {
-            const ok = validateQuestion(q).ok;
-            return (
-              <li key={q.id}>
-                <label className="check">
-                  <input type="checkbox" checked={chosen.has(q.id)} onChange={() => toggle(q.id)} />
-                  <span><b>Q{q.position}</b> {q.question_text} {q.category && <span className="badge badge-muted badge-xs">{q.category}</span>}
-                    {q.is_sample && <span className="badge badge-amber badge-xs">SAMPLE</span>} {!ok && <span className="badge badge-danger badge-xs">needs fixing</span>}</span>
-                </label>
-              </li>
-            );
-          })}
-        </ul>
+      {preview && (
+        <div className="preview-frame" aria-label="Question preview">
+          <p className="preview-q">{preview.q.question_text}</p>
+          {preview.q.image_url && <img src={preview.q.image_url} alt="" className="preview-img" />}
+          <OptionGrid question={preview.q} size="sm" keyLetter={optionLetters(preview.q).includes(preview.q.correct_option) ? preview.q.correct_option : null} />
+          <p className="muted small">Organizer preview: the correct answer ({preview.q.correct_option || 'none'}) is highlighted here only. <button type="button" className="btn btn-ghost btn-xs" onClick={() => setPreview(null)}>Close preview</button></p>
+        </div>
       )}
-      <div className="modal-actions"><button type="button" className="btn btn-primary" onClick={onClose}>Done</button></div>
+      {state.loading ? <p className="muted" role="status"><Loader2 size={16} className="spin" /> Loading previous sets…</p>
+        : state.error ? (
+          <div className="inline-alert alert-danger" role="alert"><AlertTriangle size={16} /> Could not load previous sets: {state.error.message} <button type="button" className="btn btn-ghost btn-sm" onClick={load}>Retry</button></div>
+        ) : !state.sets.length ? <p className="muted">There are no previous sets with questions yet.</p>
+          : !shown.length ? <p className="muted">No question matches the filter.</p> : (
+            <div className="import-sets">
+              {shown.map((x) => (
+                <details key={x.set_id} className="import-set" open={shown.length <= 3}>
+                  <summary>
+                    <b>{x.name}</b> <span className="badge badge-section badge-xs">{x.section}</span> <span className="badge badge-muted badge-xs">{SET_STAGE_LABELS[x.stage] || x.stage}</span>
+                    <span className="muted small">{x.questions.length} question{x.questions.length === 1 ? '' : 's'}</span>
+                    <button type="button" className="btn btn-ghost btn-xs" onClick={(e) => { e.preventDefault(); pickAll(x); }}>Select all</button>
+                  </summary>
+                  {x.questions.map((q) => {
+                    const dup = already(q);
+                    return (
+                      <div key={q.question_id} className={`import-q ${dup ? 'is-in' : ''}`}>
+                        <input type="checkbox" checked={chosen.has(q.question_id)} disabled={dup} onChange={() => toggle(q, x.set_id)}
+                          aria-label={`Import: ${q.question_text}`} />
+                        <span className="small">{q.question_text} <span className="muted">· {q.option_count} options{q.category ? ` · ${q.category}` : ''}</span>
+                          {dup && <span className="badge badge-muted badge-xs">already in this set</span>}</span>
+                        <button type="button" className="icon-btn" onClick={() => setPreview({ q: { ...q, id: q.question_id }, n: q.position })} aria-label={`Preview: ${q.question_text}`}><Eye size={15} /></button>
+                      </div>
+                    );
+                  })}
+                </details>
+              ))}
+            </div>
+          )}
+      <div className="modal-actions">
+        <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={run} disabled={!chosen.size || busy}>{busy ? 'Importing…' : `Import ${chosen.size} question${chosen.size === 1 ? '' : 's'}`}</button>
+      </div>
     </Modal>
   );
 }
@@ -373,14 +452,14 @@ function ReviewStep({ form, bankById, issues, warnings, dirty, onEdit }) {
             <dt>Quiz title</dt><dd>{form.name || '—'}</dd>
             <dt>Section</dt><dd>{SECTION_LABELS[form.section]}</dd>
             <dt>Instructions</dt><dd>{form.description || <span className="muted">none</span>}</dd>
-            <dt>Walk-in teams</dt><dd>{form.self_registration ? 'May self-register' : 'Registered teams only'}</dd>
+            <dt>Participants</dt><dd>Join with the code, their name and college (no pre-registration)</dd>
           </dl>
         </section>
         <section>
           <h3>Questions <button type="button" className="btn btn-ghost btn-xs" onClick={() => onEdit(1)}>Edit</button></h3>
           <dl className="kv small">
             <dt>Selected</dt><dd className={questionCountIssue(n) ? 'warn-text' : ''}>{n}</dd>
-            <dt>With an answer</dt><dd>{form.question_ids.filter((id) => OPTIONS.includes(bankById.get(id)?.correct_option)).length} of {n}</dd>
+            <dt>With an answer</dt><dd>{form.question_ids.filter((id) => { const q = bankById.get(id); return q && optionLetters(q).includes(q.correct_option); }).length} of {n}</dd>
             <dt>Order</dt><dd>Shuffled per team (questions and options)</dd>
           </dl>
         </section>
@@ -421,7 +500,7 @@ function PublishedStep({ onManage }) {
             <button type="button" className="btn btn-primary btn-sm" onClick={() => copy(s.join_code, 'Join code')}><Copy size={14} /> Copy code</button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => copy(joinUrl(), 'Join link')}><Copy size={14} /> Copy join link</button>
           </div>
-          <p className="center muted small">Teams join at <b>{joinUrl()}</b> with this code, then choose their section and their registered team.</p>
+          <p className="center muted small">Participants join at <b>{joinUrl()}</b> with this code, then enter their full name and college. The {s.section} section is verified from the code.</p>
         </>
       ) : <p className="warn-text"><AlertTriangle size={16} /> This set has no active join code. Manage the set to issue one.</p>}
       <div className="row gap wrap center-row">
@@ -534,8 +613,7 @@ export default function SetWizard({ onPublished, onManage }) {
 
   async function save({ quiet = false } = {}) {
     const c = draftChanges(form, server);
-    if (c.emptySelection) toast('warn', 'Question selection not saved', 'A draft must keep at least one question. Add questions, then save again.');
-    if (!c.details && !c.settings) return !c.emptySelection || quiet;
+    if (!c.details && !c.settings) return true;
     setBusy(true);
     try {
       if (c.details && !(await act('updateQuizDetails', c.details, { key: 'wizard-details', errorTitle: 'Draft not saved' })).ok) return false;

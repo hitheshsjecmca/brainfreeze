@@ -24,6 +24,7 @@ import { SAMPLE_QUESTIONS } from '../data/sampleQuestions.js';
 import { DEMO_PG_TEAMS, DEMO_TEAMS } from '../data/demoTeams.js';
 import { normalizeJoinCode, randomJoinCode, randomPin, randomToken } from './joinCodes.js';
 import { normalizeRound2 } from './round2Engine.js';
+import { optionCount, optionLetters } from './options.js';
 
 const iso = (ms) => new Date(ms).toISOString();
 
@@ -99,7 +100,8 @@ export function setStage(session) {
 function snapshotOf(questions, settings) {
   return questions.map((q, i) => ({
     question_id: q.id, position: i + 1, question_text: q.question_text,
-    option_a: q.option_a, option_b: q.option_b, option_c: q.option_c, option_d: q.option_d,
+    option_a: q.option_a, option_b: q.option_b, option_c: q.option_c ?? null, option_d: q.option_d ?? null,
+    option_e: q.option_e ?? null, option_f: q.option_f ?? null,
     image_url: q.image_url || null, category: q.category || null, correct_option: q.correct_option, explanation: q.explanation || null,
     marks_correct: q.marks_correct ?? settings.marks_correct, marks_incorrect: q.marks_incorrect ?? settings.marks_incorrect,
   }));
@@ -359,12 +361,13 @@ function shuffled(list) {
   return a;
 }
 
-/** New attempt: random question order and per-question option order (mirrors public._make_attempt). */
+/** New attempt: random question order and, per question, a random order of ITS OWN options (mirrors public._make_attempt). */
 function makeAttempt(st, teamId, ctx) {
-  const order = shuffled(sessionQuestions(st).map((q) => q.id));
+  const qs = new Map(sessionQuestions(st).map((q) => [q.id, q]));
+  const order = shuffled([...qs.keys()]);
   const a = {
     id: uuid(), session_id: st.session.id, team_id: teamId, status: 'ready',
-    question_order: order, option_orders: order.map(() => shuffled(OPTIONS).join('')),
+    question_order: order, option_orders: order.map((id) => shuffled(optionLetters(qs.get(id))).join('')),
     created_at: iso(ctx.now), started_at: null, deadline_at: null, paused_ms: 0, finished_at: null,
     finalized_by: null, finalize_reason: null, reset_at: null, reset_by: null, reset_reason: null,
   };
@@ -452,7 +455,8 @@ const TEAM_FIELDS = ['section', 'team_number', 'team_name', 'participant_1', 'pa
 function upsertTeam(st, p, ctx, role) {
   const existing = p.id ? allTeams(st).find((x) => x.id === p.id) : null;
   if (p.id && !existing) fail('TEAM_NOT_FOUND');
-  const { value, errors, ok } = validateTeam({ ...p, section: p.section || existing?.section || st.section }, allTeams(st), p.id || null);
+  const { value, errors, ok } = validateTeam({ ...p, section: p.section || existing?.section || st.section }, allTeams(st), p.id || null,
+    { requirePartner: !existing?.join_session_id });
   if (!ok) {
     if (errors.team_number?.includes('already in use')) fail('DUPLICATE_TEAM_NUMBER', errors.team_number);
     validationFail(errors);
@@ -504,7 +508,10 @@ function participantSession(st, token, ctx) {
   return st.participant_sessions.find((p) => p.token_hash === token && p.session_id === st.session.id
     && st.session.is_current !== false && !p.revoked_at && Date.parse(p.expires_at) > ctx.now) || null;
 }
-const teamPublic = (t) => ({ team_number: t.team_number, team_name: t.team_name, participant_1: t.participant_1, participant_2: t.participant_2 });
+const teamPublic = (t) => ({
+  team_number: t.team_number, team_name: t.team_name, participant_1: t.participant_1, participant_2: t.participant_2 ?? null,
+  college_name: t.college_name ?? null, section: t.section, self_joined: !!t.join_session_id,
+});
 function openParticipantSession(st, team, device, ctx) {
   const token = randomToken();
   st.participant_sessions.push({
@@ -578,6 +585,8 @@ function questionRecord(value, extra) {
     option_b: value.option_b,
     option_c: value.option_c,
     option_d: value.option_d,
+    option_e: value.option_e,
+    option_f: value.option_f,
     correct_option: value.correct_option,
     explanation: value.explanation,
     image_url: value.image_url,
@@ -599,6 +608,14 @@ function removeAnswers(st, pred) {
 }
 
 // ---------------------------------------------------------------- set actions (organizer)
+
+/** The selected draft's question ids (a legacy draft without a list uses the whole bank). Mirrors public._draft_question_ids. */
+const draftIds = (st) => (st.session.question_ids ? [...st.session.question_ids] : sessionQuestions(st).map((q) => q.id));
+function assertDraft(st) {
+  const s = st.session;
+  if (s.is_current === false || s.published_at || s.status !== 'setup') fail('SET_FROZEN', 'Questions can be added only to an unpublished draft set.');
+}
+
 
 const actions = {
   saveTeam(st, p, ctx) {
@@ -667,7 +684,6 @@ const actions = {
   startQuiz(st, _p, ctx) {
     if (st.session.status !== 'setup') fail('INVALID_STATE', 'The set is already live or completed.');
     if (!st.session.published_at) fail('NOT_PUBLISHED', 'Publish the set before going live.');
-    if (!st.teams.some((t) => isSelected(st.session, t.id))) fail('QUIZ_NO_TEAMS', 'Select and confirm the participating teams before starting the set.');
     Object.assign(st.session, {
       status: 'running', started_at: iso(ctx.now), timer_started_at: iso(ctx.now), elapsed_ms: 0,
       current_index: 0, projector_view: 'question', paused_at: null,
@@ -793,7 +809,8 @@ const actions = {
     const key = String(correct_option ?? old.correct_option).trim().toUpperCase();
     const mc = pick(marks_correct, old.marks_correct);
     const mi = pick(marks_incorrect, old.marks_incorrect);
-    if (!OPTIONS.includes(key) || !(mc >= 0 && mc <= 100) || !(mi <= 0 && mi >= -100)) fail('VALIDATION', 'Key must be A–D; correct marks 0–100; incorrect marks −100–0.');
+    const letters = optionLetters(old);
+    if (!letters.includes(key) || !(mc >= 0 && mc <= 100) || !(mi <= 0 && mi >= -100)) fail('VALIDATION', `Key must be A–${letters[letters.length - 1]}; correct marks 0–100; incorrect marks −100–0.`);
     if (key === old.correct_option && mc === Number(old.marks_correct) && mi === Number(old.marks_incorrect)) fail('NO_CHANGE');
     pushEvent(st, ctx, {
       action: 'key_change', question_id, question_position: old.position,
@@ -826,9 +843,11 @@ const actions = {
     if (other) fail('TEAM_IN_OTHER_SET', `Team ${team.team_number} takes part in "${other}".`);
     const question = sessionQuestions(st).find((q) => q.id === p.question_id);
     if (!question) fail(st.questions.some((q) => q.id === p.question_id) ? 'QUESTION_NOT_IN_QUIZ' : 'QUESTION_NOT_FOUND');
+    const sel = normalizeOption(p.selected);
+    if (sel !== null && !optionLetters(question).includes(sel)) fail('INVALID_OPTION', 'That option does not exist for this question.');
     const a = activeAttempt(st, st.session.id, team.id);
     const onTime = st.session.status === 'running' && elapsedMs(st.session, ctx.now) < st.settings.duration_seconds * 1000;
-    return applyAnswer(st, ctx, team, question, normalizeOption(p.selected), p, 'organizer', { attempt_id: a?.id ?? null, on_time: onTime });
+    return applyAnswer(st, ctx, team, question, sel, p, 'organizer', { attempt_id: a?.id ?? null, on_time: onTime });
   },
 
   undoLast(st, { request_id }, ctx) {
@@ -938,8 +957,7 @@ const actions = {
       else {
         if (!Array.isArray(p.question_ids)) fail('VALIDATION', 'question_ids must be an array or null.');
         if (new Set(p.question_ids).size !== p.question_ids.length) fail('VALIDATION', 'A question can be selected only once.');
-        ids = [...p.question_ids];
-        if (!ids.length) fail('VALIDATION', 'Select at least one question.');
+        ids = [...p.question_ids]; // a draft may be empty; publishing needs at least one question
         const known = new Set(st.questions.map((q) => q.id));
         if (!ids.every((id) => known.has(id))) fail('VALIDATION', 'A selected question no longer exists.');
       }
@@ -967,6 +985,7 @@ const actions = {
     if (qs.some((q) => (q.marks_correct ?? st.settings.marks_correct) < 0 || (q.marks_incorrect ?? st.settings.marks_incorrect) > 0)) {
       fail('VALIDATION', 'Every question needs valid marks (correct ≥ 0, incorrect ≤ 0).');
     }
+    if (qs.some((q) => !optionLetters(q).includes(q.correct_option))) fail('QUIZ_NOT_READY', "A question's answer key is not one of its options.");
     st.set.set_questions = snapshotOf(qs, st.settings);
     st.set_questions = st.set.set_questions;
     Object.assign(s, { published_at: iso(ctx.now), published_by: ctx.actor || 'demo-organizer', self_paced: true, question_ids: qs.map((q) => q.id) });
@@ -1113,6 +1132,134 @@ const actions = {
     return no('TEAM_NOT_SELECTED', { registered: true, team_number: num, section: s.section });
   },
 
+  // Join with the code and one's own details (mirrors public.join_quiz). No pre-registration, list or PIN.
+  joinQuiz(st, { code, full_name, college_name, request_id, section = null, device_label }, ctx) {
+    if (rateLimited(st, ctx)) return no('RATE_LIMITED');
+    const s = quizByCode(st, code);
+    if (!s) { logFailure(st, ctx); return no('INVALID_CODE'); }
+    const sec = String(section ?? '').trim().toUpperCase();
+    if (sec && sec !== s.section) return no('SECTION_MISMATCH', { section: s.section });
+    if (!request_id) return no('VALIDATION', { message: 'This join request is incomplete. Reload the page and try again.' });
+    const clean = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+    const bad = (v, max) => !v || v.length > max || !/\p{L}/u.test(v) || /[\p{Cc}<>]/u.test(v);
+    const name = clean(full_name);
+    const college = clean(college_name);
+    if (bad(name, 80)) return no('VALIDATION', { field: 'full_name', message: 'Enter your full name (up to 80 characters).' });
+    if (bad(college, 120)) return no('VALIDATION', { field: 'college_name', message: 'Enter your college name (up to 120 characters).' });
+    const same = (t) => t.participant_1.toLowerCase() === name.toLowerCase() && (t.college_name || '').toLowerCase() === college.toLowerCase();
+    const mine = st.teams.filter((t) => t.join_session_id === s.id);
+    let team = mine.find((t) => t.join_request_id === request_id) || null;
+    let known = false;
+    if (team) {
+      if (!same(team)) return no('VALIDATION', { message: 'This join request was already used with other details. Reload the page and try again.' });
+      known = true;
+    } else {
+      team = mine.find(same) || null;
+      if (team) {
+        if (liveDevice(st, s.id, team.id, ctx)) { logFailure(st, ctx); return no('ALREADY_JOINED'); }
+        team.join_request_id = request_id; // released by an organizer: continue the same attempt here
+        known = true;
+      }
+    }
+    if (known) {
+      if (!isSelected(s, team.id)) return no('PARTICIPANT_REMOVED');
+    } else {
+      if (!s.registration_open) return no('REGISTRATION_CLOSED');
+      const used = new Set(st.teams.map((t) => t.team_number));
+      let num = 1;
+      while (used.has(num)) num++;
+      team = {
+        section: s.section, team_number: num, team_name: name, participant_1: name, participant_2: null, college_name: college,
+        is_demo: false, self_registered: true, join_session_id: s.id, join_request_id: request_id,
+        id: uuid(), created_at: iso(ctx.now), updated_at: iso(ctx.now),
+      };
+      st.teams.push(team);
+      st.teams.sort((a, b) => a.team_number - b.team_number);
+      st.credentials[team.id] = randomPin();
+      st.registration_events.push({ id: st.registration_events.length + 1, team_id: team.id, section: s.section, team_number: num, action: 'create', changes: {}, actor: null, actor_role: 'registration', created_at: iso(ctx.now) });
+      s.team_ids = [...(s.team_ids || []), team.id];
+    }
+    revokeParticipantSessions(st, 'Replaced by a new join on this device', ctx, team.id, s.id);
+    if (!activeAttempt(st, s.id, team.id)) makeAttempt(st, team.id, ctx);
+    return { ok: true, token: openParticipantSession(st, team, device_label, ctx), team: teamPublic(team), quiz_title: s.name, section: s.section, resumed: known };
+  },
+
+  // ------------------------------------------------ fresh sets: Save & Next and explicit imports (organizer)
+  // A new question is saved AND added to the selected draft (mirrors public.save_set_question).
+  saveSetQuestion(st, p, ctx) {
+    if (p.id) {
+      const res = global.saveQuestion(st, p, ctx);
+      return { ...res, count: draftIds(st).length, added: false };
+    }
+    assertDraft(st);
+    const ids = draftIds(st);
+    const { id: _id, position: _p, ...rest } = p;
+    const res = global.saveQuestion(st, rest, ctx);
+    st.session.question_ids = [...ids, res.id];
+    return { ...res, count: ids.length + 1, added: true };
+  },
+
+  // The other sets' questions to choose from (mirrors public.previous_set_questions; frozen copies when published).
+  previousSetQuestions(st) {
+    return [...st.sets]
+      .filter((x) => x.session.id !== st.session.id)
+      .sort((a, b) => b.session.created_at.localeCompare(a.session.created_at))
+      .map((x) => ({ x, qs: sessionQuestions({ session: x.session, questions: st.questions, set_questions: x.set_questions }) }))
+      .filter(({ qs }) => qs.length > 0)
+      .map(({ x, qs }) => ({
+        set_id: x.session.id, name: x.session.name, section: x.session.section, stage: setStage(x.session), created_at: x.session.created_at,
+        questions: qs.map((q, i) => {
+          const bank = st.questions.find((b) => b.id === q.id);
+          return {
+            question_id: q.id, position: i + 1, question_text: q.question_text,
+            ...Object.fromEntries(['a', 'b', 'c', 'd', 'e', 'f'].map((l) => [`option_${l}`, q[`option_${l}`] ?? null])),
+            option_count: optionCount(q), image_url: q.image_url || null, correct_option: q.correct_option ?? null,
+            explanation: q.explanation || null, category: bank?.category ?? q.category ?? null, source_question_id: bank?.source_question_id ?? null,
+          };
+        }),
+      }));
+  },
+
+  // Copy questions from previous sets into the selected draft (mirrors public.import_set_questions).
+  importSetQuestions(st, { items }, ctx) {
+    if (!Array.isArray(items) || items.length === 0) fail('VALIDATION', 'Choose at least one question to import.');
+    if (items.length > 1000) fail('VALIDATION', 'Import at most 1000 questions at a time.');
+    assertDraft(st);
+    const ids = draftIds(st);
+    const created = [];
+    let skipped = 0;
+    for (const it of items) {
+      if (!it?.set_id || !it?.question_id) fail('VALIDATION', 'Unknown question.');
+      if (it.set_id === st.session.id) fail('VALIDATION', 'Choose questions from another set.');
+      const src = findSet(st, it.set_id);
+      if (!src) fail('NO_SESSION', 'That quiz set does not exist.');
+      const q = sessionQuestions({ session: src.session, questions: st.questions, set_questions: src.set_questions }).find((x) => x.id === it.question_id);
+      if (!q) fail('QUESTION_NOT_IN_QUIZ');
+      const bank = st.questions.find((b) => b.id === q.id);
+      const root = bank?.source_question_id || q.id;
+      // Duplicates: the question itself, or any copy of the same original, already in this draft.
+      const dup = ids.includes(q.id) || ids.includes(root)
+        || st.questions.some((x) => ids.includes(x.id) && (x.source_question_id === q.id || x.source_question_id === root));
+      if (dup) { skipped++; continue; }
+      const copy = {
+        id: uuid(), position: st.questions.length + 1, question_text: q.question_text,
+        option_a: q.option_a, option_b: q.option_b, option_c: q.option_c ?? null, option_d: q.option_d ?? null,
+        option_e: q.option_e ?? null, option_f: q.option_f ?? null,
+        correct_option: q.correct_option ?? null, explanation: q.explanation || null, image_url: q.image_url || null,
+        category: bank?.category ?? q.category ?? null,
+        // per-question marks come from the bank question (a published copy stores the set's resolved marks)
+        marks_correct: bank?.marks_correct ?? null, marks_incorrect: bank?.marks_incorrect ?? null, is_sample: !!bank?.is_sample,
+        source_question_id: root, created_at: iso(ctx.now), updated_at: iso(ctx.now), // the root original, also for a copy of a copy
+      };
+      st.questions.push(copy);
+      ids.push(copy.id);
+      created.push(copy.id);
+    }
+    st.session.question_ids = ids;
+    renumber(st);
+    return { imported: created.length, skipped, ids: created, count: ids.length };
+  },
+
   // The team's attempt: status, server times, and (while running) one question in
   // the team's own order with options in the team's own order. Never keys or points.
   participantState(st, { token, position = null }, ctx) {
@@ -1154,11 +1301,12 @@ const actions = {
       if (pos === null) { pos = progress.indexOf(false); if (pos < 0) pos = 0; }
       const perm = a.option_orders[pos];
       const q = byId.get(a.question_order[pos]);
-      const opt = (k) => q[`option_${perm[k].toLowerCase()}`];
       const ans = mineFor(q.id);
       const shown = ans?.selected_option ? (ans.displayed_option || OPTIONS[perm.indexOf(ans.selected_option)]) : null;
+      // Displayed letter i shows original option perm[i]; only this question's own options are sent.
+      const options = Object.fromEntries([...perm].map((orig, i) => [`option_${'abcdef'[i]}`, q[`option_${orig.toLowerCase()}`]]));
       Object.assign(res, {
-        question: { id: q.id, number: pos + 1, question_text: q.question_text, option_a: opt(0), option_b: opt(1), option_c: opt(2), option_d: opt(3), image_url: q.image_url || null },
+        question: { id: q.id, number: pos + 1, question_text: q.question_text, ...options, option_count: perm.length, image_url: q.image_url || null },
         position: pos, progress, question_closed: false,
         my_answer: ans ? { selected: shown, submitted_at: ans.created_at, source: ans.source } : null,
       });
@@ -1206,7 +1354,7 @@ const actions = {
     const i = a.question_order.indexOf(question_id);
     if (i < 0) return no('QUESTION_NOT_IN_QUIZ');
     const shown = String(option ?? '').trim().toUpperCase();
-    if (!OPTIONS.includes(shown)) return no('INVALID_OPTION');
+    if (!OPTIONS.slice(0, a.option_orders[i].length).includes(shown)) return no('INVALID_OPTION');
     const orig = a.option_orders[i][OPTIONS.indexOf(shown)];
     const ex = sessionAnswers(st).find((x) => x.team_id === ps.team_id && x.question_id === question_id);
     if (ex && ex.source !== 'participant') return no('ALREADY_SUBMITTED', { selected: ex.displayed_option || OPTIONS[a.option_orders[i].indexOf(ex.selected_option)] });
@@ -1284,7 +1432,7 @@ function inSet(st, set, fn) {
   }
 }
 
-const BY_CODE = new Set(['joinLookup', 'joinRoster', 'joinRegisteredTeam', 'joinTeam', 'registerTeam']);
+const BY_CODE = new Set(['joinLookup', 'joinQuiz', 'joinRoster', 'joinRegisteredTeam', 'joinTeam', 'registerTeam']);
 const BY_TOKEN = new Set(['participantState', 'participantStart', 'participantSubmit', 'participantFinish', 'participantLeave']);
 
 function setFor(st, name, payload, ctx) {
@@ -1317,6 +1465,7 @@ const global = {
     if (!name || name.length > 80) fail('VALIDATION', 'Quiz set name is required (max 80 characters).');
     const set = newSet(ctx.now, section, name);
     set.session.description = String(p.description ?? '').replace(/\s+/g, ' ').trim() || null;
+    set.session.question_ids = []; // a new set starts empty: nothing from the bank or earlier sets (mirrors create_set)
     st.sets.push(set);
     return { id: set.session.id };
   },

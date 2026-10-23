@@ -1,6 +1,7 @@
 // Static contract check: every RPC the Supabase backend calls exists in the
 // migrations with exactly the argument names used, and is granted to the right
-// role (organizer + registration-desk RPCs → authenticated only; participant RPCs → anon too).
+// role (organizer RPCs → authenticated only; participant RPCs → anon too). The registration desk and the
+// pre-registered team join (roster / PIN) are retired: the app no longer calls them and nobody may execute them.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -32,7 +33,6 @@ const parseCalls = (text) => [...text.matchAll(/\['(\w+)', \{([^}]*)\}\]/g)].map
   args: [...m[2].matchAll(/(\w+):/g)].map((x) => x[1]).concat(/\{ p \}/.test(`{${m[2]}}`) ? ['p'] : []),
 }));
 const organizerCalls = parseCalls(section('RPC'));
-const registrationCalls = parseCalls(section('REG_RPC'));
 const participantCalls = parseCalls(section('PARTICIPANT_RPC'));
 const round2Calls = parseCalls(section('R2_RPC'));
 const direct = [...backend.matchAll(/(?:supabase\.rpc|setRpc)\('(\w+)'/g)].map((m) => m[1]);
@@ -40,13 +40,14 @@ const direct = [...backend.matchAll(/(?:supabase\.rpc|setRpc)\('(\w+)'/g)].map((
 describe('Supabase RPC contract', () => {
   it('finds the RPC maps', () => {
     expect(organizerCalls.length).toBeGreaterThan(30);
-    expect(registrationCalls).toHaveLength(3);
-    expect(participantCalls).toHaveLength(10);
+    expect(backend).not.toContain('REG_RPC');
+    expect(participantCalls).toHaveLength(7);
     // quiz sets (migration 6)
-    for (const fn of ['create_set', 'duplicate_set', 'delete_set', 'archive_set', 'revoke_join_code', 'finalize_attempt', 'reset_attempt', 'correct_set_question']) {
+    for (const fn of ['create_set', 'duplicate_set', 'delete_set', 'archive_set', 'revoke_join_code', 'finalize_attempt', 'reset_attempt', 'correct_set_question',
+      'save_set_question', 'previous_set_questions', 'import_set_questions']) {
       expect(organizerCalls.map((c) => c.fn)).toContain(fn);
     }
-    expect(participantCalls.map((c) => c.fn)).toEqual(expect.arrayContaining(['participant_start', 'participant_finish', 'join_roster', 'join_registered_team']));
+    expect(participantCalls.map((c) => c.fn)).toEqual(['join_lookup', 'join_quiz', 'participant_state', 'participant_start', 'participant_submit', 'participant_finish', 'participant_leave']);
     expect(direct).toEqual(expect.arrayContaining(['get_set_results', 'get_standings', 'server_now']));
   });
 
@@ -63,7 +64,7 @@ describe('Supabase RPC contract', () => {
     expect(backend).not.toMatch(/r3s_|R3_RPC/);
   });
 
-  for (const { fn, args } of [...organizerCalls, ...registrationCalls, ...round2Calls]) {
+  for (const { fn, args } of [...organizerCalls, ...round2Calls]) {
     it(`${fn}(${args.join(', ')}) matches SQL, granted to authenticated only`, () => {
       expect(fns.has(fn), `function ${fn} missing`).toBe(true);
       for (const a of args) expect(fns.get(fn), `${fn} lacks param ${a}`).toContain(a);
@@ -85,7 +86,7 @@ describe('Supabase RPC contract', () => {
     });
   }
   it('participant functions are granted with their current signatures', () => {
-    expect(anonGrants).toContain('public.register_team(text, text, text, text, text, text)');
+    expect(anonGrants).toContain('public.join_quiz(text, text, text, uuid, text, text)');
     expect(anonGrants).toContain('public.participant_state(text, integer)');
   });
   it('organizer RPCs are scoped by the x-brainfreze-set header', () => {
@@ -96,7 +97,11 @@ describe('Supabase RPC contract', () => {
     const pub = backend.slice(backend.indexOf('async loadPublicSnapshot'), backend.indexOf('subscribe(onChange'));
     expect(pub).not.toMatch(/correct_option|explanation|question_keys/);
   });
-  it('the registration desk has no organizer-only grant of its own', () => {
-    for (const f of ['reg_overview', 'reg_save_team', 'registration_access']) expect(anonGrants).not.toContain(`public.${f}(`);
+  it('retired registration-desk and pre-registered join functions are granted to nobody', () => {
+    for (const f of ['reg_overview', 'reg_save_team', 'registration_access', 'is_registration_staff', 'join_roster', 'join_registered_team', 'join_team', 'register_team']) {
+      expect(anonGrants).not.toContain(`public.${f}(`);
+      expect(authGrants).not.toContain(`public.${f}(`);
+      expect(backend).not.toContain(`'${f}'`);
+    }
   });
 });

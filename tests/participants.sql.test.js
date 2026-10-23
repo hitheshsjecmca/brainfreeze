@@ -1,7 +1,8 @@
-// Participant join / attempt / answer flow against the real migrations in
-// PGlite, calling participant functions as the `anon` role exactly as the browser would.
+// Participant attempt / answer flow against the real migrations in PGlite, calling participant functions as the
+// `anon` role exactly as the browser would. Registered teams are attached to devices with the test fixture
+// attachTeam (the PIN / roster sign-in is retired, migration 17); the self-join path is in self_join.sql.test.js.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { asRole, createDb, errCode, ORG, STRANGER, selectTeams } from './helpers/db.js';
+import { asRole, attachTeam, createDb, errCode, ORG, STRANGER, selectTeams } from './helpers/db.js';
 
 let db;
 let n = 0;
@@ -78,8 +79,9 @@ describe('publishing and join codes', () => {
 
   it('draft: title, description and 30 questions; publish freezes the set and generates a 6-digit code', async () => {
     const ids = (await org('select id from public.questions where position <= 30 order by position')).rows.map((r) => r.id);
+    expect(await errCode(orgRpc('update_quiz_details', [{ question_ids: [] }]))).toBe('NO_ERROR'); // a draft may be empty
+    expect(await errCode(orgRpc('publish_quiz'))).toBe('QUESTION_COUNT');
     await orgRpc('update_quiz_details', [{ name: 'Cold Start Final', description: 'Round 1', question_ids: ids }]);
-    expect(await errCode(orgRpc('update_quiz_details', [{ question_ids: [] }]))).toBe('VALIDATION');
     const res = await orgRpc('publish_quiz');
     await selectTeams(db, 'UG');
     code = res.join_code;
@@ -126,15 +128,17 @@ describe('publishing and join codes', () => {
 });
 
 describe('team identity and attempts', () => {
-  it('requires the team PIN; unknown team and wrong PIN give the same error', async () => {
-    expect(await anon('join_team', [code, 1, 'WRONG1', null])).toEqual({ ok: false, error: 'INVALID_TEAM_OR_PIN' });
-    expect(await anon('join_team', [code, 99, await pin(1), null])).toEqual({ ok: false, error: 'INVALID_TEAM_OR_PIN' });
-    const a = await anon('join_team', [code, 1, (await pin(1)).toLowerCase(), 'Device A'], '10.0.0.2');
+  it('the retired PIN, roster and walk-in sign-ins cannot be called; an attached team gets a token and one attempt', async () => {
+    for (const call of [`public.join_team('${code}', 1, '${await pin(1)}', null)`, `public.join_roster('${code}', 'UG')`,
+      `public.join_registered_team('${code}', 'UG', 1, null)`, `public.register_team('${code}', 'x', 'a', 'b', 'c', null)`]) {
+      expect(await errCode(asRole(db, 'anon', null, `select ${call}`)), call).toMatch(/permission denied/);
+    }
+    const a = await attachTeam(db, code, 'UG', 1, '10.0.0.2', 'Device A');
     expect(a.ok).toBe(true);
     expect(a.token).toMatch(/^[0-9a-f]{64}$/);
-    expect(a.team).toEqual({ team_number: 1, team_name: 'Team 1', participant_1: 'P1a', participant_2: 'P1b' });
+    expect(a.team).toMatchObject({ team_number: 1, team_name: 'Team 1', participant_1: 'P1a', participant_2: 'P1b', section: 'UG', self_joined: false });
     tokenA = a.token;
-    tokenB = (await anon('join_team', [code, 2, await pin(2), 'Device B'], '10.0.0.3')).token;
+    tokenB = (await attachTeam(db, code, 'UG', 2, '10.0.0.3', 'Device B')).token;
     // Joining creates one attempt per team with a stored random order.
     const att = (await db.query('select status, cardinality(question_order) n, cardinality(option_orders) m from public.quiz_attempts')).rows;
     expect(att).toEqual([{ status: 'ready', n: 30, m: 30 }, { status: 'ready', n: 30, m: 30 }]);
@@ -146,18 +150,18 @@ describe('team identity and attempts', () => {
     expect(rows.every((r) => /^[0-9a-f]{64}$/.test(r.token_hash))).toBe(true);
   });
 
-  it('a second device cannot take over an actively connected team', async () => {
-    expect(await anon('join_team', [code, 1, await pin(1), 'Intruder'], '10.0.0.4')).toEqual({ ok: false, error: 'TEAM_ALREADY_CONNECTED' });
+  it('a second device cannot take over a signed-in team', async () => {
+    expect(await attachTeam(db, code, 'UG', 1, '10.0.0.4', 'Intruder')).toEqual({ ok: false, error: 'TEAM_ALREADY_JOINED' });
   });
 
-  it('a silent device can be replaced with the PIN (same attempt, old token revoked); organizer can disconnect devices', async () => {
-    const t3 = (await anon('join_team', [code, 3, await pin(3), 'Old phone'], '10.0.0.5')).token;
+  it('after the organizer releases a device, a replacement resumes the same attempt; the old token is revoked', async () => {
+    const t3 = (await attachTeam(db, code, 'UG', 3, '10.0.0.5', 'Old phone')).token;
     const before = (await db.query('select id from public.quiz_attempts where team_id = $1', [await teamId(3)])).rows[0].id;
-    await db.query(`update public.participant_sessions set last_seen_at = now() - interval '2 minutes' where revoked_at is null and team_id = $1`, [await teamId(3)]);
-    const t3b = (await anon('join_team', [code, 3, await pin(3), 'New phone'], '10.0.0.5')).token;
+    expect((await orgRpc('revoke_participant', [await teamId(3)])).revoked).toBe(1);
+    expect(await anon('participant_state', [t3])).toEqual({ ok: false, error: 'SESSION_REVOKED', message: 'Disconnected by organizer' });
+    const t3b = (await attachTeam(db, code, 'UG', 3, '10.0.0.5', 'New phone')).token;
     expect(t3b).toMatch(/^[0-9a-f]{64}$/);
     expect((await db.query('select id from public.quiz_attempts where team_id = $1', [await teamId(3)])).rows.map((r) => r.id)).toEqual([before]);
-    expect(await anon('participant_state', [t3])).toEqual({ ok: false, error: 'SESSION_REVOKED', message: 'Replaced by a new device sign-in' });
     expect((await orgRpc('revoke_participant', [await teamId(3)])).revoked).toBe(1);
     expect((await anon('participant_state', [t3b])).error).toBe('SESSION_REVOKED');
   });
@@ -165,26 +169,14 @@ describe('team identity and attempts', () => {
   it('closing registration blocks new teams but lets already-joined teams reconnect', async () => {
     await orgRpc('set_registration', [false]);
     await orgRpc('save_team', [{ team_number: 4, team_name: 'Team 4', participant_1: 'x', participant_2: 'y', college_name: 'Test College' }]);
-    expect(await anon('join_team', [code, 4, await pin(4), null])).toEqual({ ok: false, error: 'TEAM_NOT_SELECTED' }); // registered, not yet chosen
+    expect(await attachTeam(db, code, 'UG', 4)).toEqual({ ok: false, error: 'TEAM_NOT_SELECTED' }); // registered, not yet chosen
     await selectTeams(db, 'UG');
-    expect(await anon('join_team', [code, 4, await pin(4), null])).toEqual({ ok: false, error: 'REGISTRATION_CLOSED' });
-    const again = await anon('join_team', [code, 3, await pin(3), 'Phone again'], '10.0.0.5');
+    expect(await attachTeam(db, code, 'UG', 4)).toEqual({ ok: false, error: 'REGISTRATION_CLOSED' });
+    expect((await anon('join_quiz', [code, 'New Person', 'Some College', rid(), null, null], '10.0.0.6')).error).toBe('REGISTRATION_CLOSED');
+    const again = await attachTeam(db, code, 'UG', 3, '10.0.0.5', 'Phone again');
     expect(again.ok).toBe(true);
     await orgRpc('revoke_participant', [await teamId(3)]);
     await orgRpc('set_registration', [true]);
-  });
-
-  it('self-registration is off unless the organizer enables it; then prevents duplicate names', async () => {
-    expect((await anon('register_team', [code, 'Walk-ins', 'A', 'B', 'Walk College', null])).error).toBe('SELF_REGISTRATION_CLOSED');
-    await orgRpc('update_quiz_details', [{ self_registration: true }]);
-    const r = await anon('register_team', [code, 'Walk-ins', 'Asha', 'Bilal', 'Walk College', 'Tablet 9'], '10.0.0.9');
-    // The walk-in team is registered, but only the organiser can add it to the set's participants.
-    expect(r).toEqual({ ok: false, error: 'TEAM_NOT_SELECTED', registered: true, team_number: 5, section: 'UG' });
-    expect((await db.query(`select self_registered from public.teams where section = 'UG' and team_number = 5`)).rows[0].self_registered).toBe(true);
-    expect((await db.query(`select count(*)::int c from public.quiz_attempts a join public.teams t on t.id = a.team_id where t.team_number = 5`)).rows[0].c).toBe(0);
-    expect((await anon('register_team', [code, 'walk-INS', 'C', 'D', 'Walk College', null], '10.0.0.10')).error).toBe('TEAM_NAME_TAKEN');
-    expect((await anon('register_team', [code, '', 'C', 'D', 'Walk College', null], '10.0.0.10')).error).toBe('VALIDATION');
-    await orgRpc('update_quiz_details', [{ self_registration: false }]);
   });
 
   it('rate-limits repeated failed attempts from one client', async () => {

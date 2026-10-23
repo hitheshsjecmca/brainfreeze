@@ -1,8 +1,8 @@
-// UG/PG sections, the registration-desk role and self-paced per-team shuffling,
+// UG/PG sections, the retired registration-desk role and self-paced per-team shuffling,
 // against the real migrations in PGlite. Organizer calls pick their section with
 // the x-brainfreze-section header exactly as the browser does.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { asRole, createDb, errCode, ORG, STAFF, STRANGER, selectTeams } from './helpers/db.js';
+import { asRole, attachTeam, createDb, errCode, joinQuiz, ORG, STAFF, STRANGER, selectTeams } from './helpers/db.js';
 
 let db;
 let n = 0;
@@ -16,7 +16,6 @@ const anon = async (fn, args = [], ip = '10.1.0.1') =>
   (await asRole(db, 'anon', null, `select public.${fn}(${ph(args)}) as r`, args, { 'x-forwarded-for': ip })).rows[0].r;
 const team = (team_number, extra = {}) => ({ team_number, team_name: `Team ${team_number}${extra.section || ''}`, participant_1: 'P1', participant_2: 'P2', college_name: 'MCA College', ...extra });
 const teamRow = async (section, num) => (await db.query('select * from public.teams where section = $1 and team_number = $2', [section, num])).rows[0];
-const pinOf = async (section, num) => (await db.query('select c.pin from public.team_credentials c join public.teams t on t.id = c.team_id where t.section = $1 and t.team_number = $2', [section, num])).rows[0].pin;
 
 const QUESTIONS = Array.from({ length: 30 }, (_, i) => ({
   question_text: `Question ${i + 1}?`, option_a: `a${i}`, option_b: `b${i}`, option_c: `c${i}`, option_d: `d${i}`,
@@ -84,71 +83,38 @@ describe('sections', () => {
   });
 });
 
-describe('registration desk role', () => {
+describe('registration desk (retired, migration 17)', () => {
   let createdId;
 
-  it('reports which consoles an account may open', async () => {
-    expect(await staff('registration_access')).toEqual({ staff: true, organizer: false });
-    expect(await org('registration_access')).toEqual({ staff: false, organizer: true });
-    expect(await call(STRANGER, 'registration_access')).toEqual({ staff: false, organizer: false });
+  it('the registration desk functions can no longer be called by anyone', async () => {
+    for (const [fn, args] of [['registration_access', []], ['is_registration_staff', []], ['reg_overview', []], ['reg_save_team', [team(20, { section: 'UG' })]]]) {
+      for (const sub of [STAFF, ORG, STRANGER]) expect(await errCode(call(sub, fn, args)), `${fn} as ${sub}`).toMatch(/permission denied/);
+      expect(await errCode(asRole(db, 'anon', null, `select public.${fn}(${ph(args)})`, args))).toMatch(/permission denied/);
+    }
+    createdId = (await org('save_team', [team(20, { section: 'UG', team_name: 'Desk Team' })])).id;
   });
 
-  it('staff create teams in either section; numbers unique per section; college required', async () => {
-    const r = await staff('reg_save_team', [team(20, { section: 'UG', team_name: 'Desk Team' })]);
-    createdId = r.id;
-    expect(r.pin).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
-    expect((await staff('reg_save_team', [team(20, { section: 'PG', team_name: 'Desk PG' })])).id).toBeTruthy();
-    expect(await errCode(staff('reg_save_team', [team(20, { section: 'UG', team_name: 'Again' })]))).toBe('DUPLICATE_TEAM_NUMBER');
-    expect(await errCode(staff('reg_save_team', [team(21, { section: 'UG', college_name: '' })]))).toBe('VALIDATION');
-    expect(await errCode(staff('reg_save_team', [team(21)]))).toBe('VALIDATION'); // no section given
-  });
-
-  it('staff can edit a team and cannot set the demo flag; every change is logged', async () => {
-    await staff('reg_save_team', [{ ...team(20, { section: 'UG', team_name: 'Desk Team Renamed', college_name: 'Other College' }), id: createdId, is_demo: true }]);
-    const t = (await db.query('select * from public.teams where id = $1', [createdId])).rows[0];
-    expect(t).toMatchObject({ team_name: 'Desk Team Renamed', college_name: 'Other College', is_demo: false });
-    const ev = (await db.query('select action, actor, actor_role, changes from public.registration_events where team_id = $1 order by id', [createdId])).rows;
-    expect(ev.map((e) => [e.action, e.actor_role, e.actor])).toEqual([['create', 'registration', STAFF], ['update', 'registration', STAFF]]);
-    expect(ev[1].changes).toEqual({ team_name: ['Desk Team', 'Desk Team Renamed'], college_name: ['MCA College', 'Other College'] });
-  });
-
-  it('the overview has teams, PINs and section status but no questions, answers or scores', async () => {
-    const o = await staff('reg_overview');
-    expect(o.sections.map((s) => [s.section, s.live_sets])).toEqual([['PG', 0], ['UG', 0]]);
-    expect(o.teams.every((t) => t.locked === false)).toBe(true);
-    expect(o.teams.find((t) => t.id === createdId)).toMatchObject({ section: 'UG', team_number: 20, college_name: 'Other College' });
-    expect(o.teams.every((t) => /^[A-HJ-NP-Z2-9]{6}$/.test(t.pin))).toBe(true);
-    expect(JSON.stringify(o)).not.toMatch(/question|answer|points|SECRET/i);
-  });
-
-  it('staff cannot read any table directly', async () => {
+  it('former registration staff cannot read any table directly', async () => {
     for (const t of ['teams', 'questions', 'question_keys', 'team_credentials', 'team_answers', 'score_events', 'quiz_sessions', 'quiz_settings', 'participant_sessions', 'registration_events', 'organizers']) {
       expect((await asRole(db, 'authenticated', STAFF, `select count(*)::int c from public.${t}`)).rows[0].c, t).toBe(0);
     }
-    expect((await asRole(db, 'authenticated', STAFF, 'select count(*)::int c from public.registration_staff')).rows[0].c).toBe(1); // own row only
   });
 
-  it('staff cannot manage questions, scoring, timers, sessions or answer keys', async () => {
+  it('former registration staff cannot manage questions, scoring, timers, sessions or answer keys', async () => {
     const calls = [
       ['save_question', [QUESTIONS[0]]], ['delete_question', [rid(), true]], ['import_questions', [QUESTIONS, false, false]],
       ['update_settings', [{ duration_seconds: 60 }]], ['start_quiz', []], ['pause_quiz', []], ['end_quiz', []], ['reset_timer', []],
       ['publish_quiz', []], ['new_session', []], ['update_quiz_details', [{ name: 'x' }]], ['set_projector_view', ['standby']],
       ['record_answer', [rid(), createdId, rid(), 'A', false, null]], ['save_team', [team(30)]], ['delete_team', [createdId, true]],
       ['rotate_team_pin', [createdId]], ['restore_backup', [{}]], ['confirm_qualifiers', [[], null]],
+      ['save_set_question', [QUESTIONS[0]]], ['import_set_questions', [[]]], ['previous_set_questions', []],
     ];
     for (const [fn, args] of calls) expect(await errCode(staff(fn, args)), fn).toBe('NOT_AUTHORIZED');
     expect(await errCode(asRole(db, 'authenticated', STAFF, 'select * from public.get_standings()'))).toBe('NOT_AUTHORIZED');
   });
 
-  it('other signed-in accounts and anon cannot use the registration desk', async () => {
-    expect(await errCode(call(STRANGER, 'reg_overview'))).toBe('NOT_AUTHORIZED');
-    expect(await errCode(call(STRANGER, 'reg_save_team', [team(40, { section: 'UG' })]))).toBe('NOT_AUTHORIZED');
-    expect(await errCode(asRole(db, 'anon', null, 'select public.reg_overview()'))).toMatch(/permission denied/);
-    expect(await errCode(asRole(db, 'anon', null, 'select public.reg_save_team(null)'))).toMatch(/permission denied/);
-  });
-
   it('registration history is append-only', async () => {
-    expect(await errCode(db.query('update public.registration_events set actor_role = $1', ['organizer']))).toBe('AUDIT_IMMUTABLE');
+    expect(await errCode(db.query('update public.registration_events set actor_role = $1', ['registration']))).toBe('AUDIT_IMMUTABLE');
     expect(await errCode(db.query('delete from public.registration_events'))).toBe('AUDIT_IMMUTABLE');
   });
 
@@ -173,34 +139,22 @@ describe('join codes per section and team identity', () => {
     expect((await anon('join_lookup', [pgCode])).quiz.section).toBe('PG');
   });
 
-  it('a team can only join with its own section code (team number alone is never enough)', async () => {
-    // Team 1 exists in both sections with different PINs.
-    expect(await anon('join_team', [ugCode, 1, await pinOf('PG', 1), null])).toEqual({ ok: false, error: 'INVALID_TEAM_OR_PIN' });
-    expect(await anon('join_team', [ugCode, 2, await pinOf('PG', 2), null])).toEqual({ ok: false, error: 'INVALID_TEAM_OR_PIN' }); // no UG team 2
-    const pg = await anon('join_team', [pgCode, 1, await pinOf('PG', 1), null], '10.1.0.2');
-    expect(pg).toMatchObject({ ok: true, section: 'PG', team: { team_number: 1, team_name: 'Team 1PG' } });
-  });
-
-  it('walk-in registration lands in the code’s section', async () => {
-    await org('update_quiz_details', [{ self_registration: true }], 'PG');
-    const r = await anon('register_team', [pgCode, 'Walk PG', 'A', 'B', 'Walk College', null], '10.1.0.3');
-    expect(r).toMatchObject({ ok: false, error: 'TEAM_NOT_SELECTED', registered: true, section: 'PG' }); // the organiser selects it before it can play
+  it('the code decides the section: a self-joined participant lands in the code’s section and cannot claim the other one', async () => {
+    const pg = await joinQuiz(db, pgCode, 'Walk PG', 'Walk College', { ip: '10.1.0.3' });
+    expect(pg).toMatchObject({ ok: true, section: 'PG', team: { section: 'PG', participant_1: 'Walk PG', college_name: 'Walk College' } });
     expect((await db.query(`select section, college_name from public.teams where team_name = 'Walk PG'`)).rows[0]).toEqual({ section: 'PG', college_name: 'Walk College' });
+    expect(await joinQuiz(db, ugCode, 'Other', 'Walk College', { ip: '10.1.0.3', section: 'PG' })).toMatchObject({ ok: false, error: 'SECTION_MISMATCH', section: 'UG' });
+    // a registered PG team attached to the PG code
+    expect(await attachTeam(db, pgCode, 'PG', 1, '10.1.0.2')).toMatchObject({ ok: true, section: 'PG', team: { team_number: 1, team_name: 'Team 1PG' } });
+    expect(await attachTeam(db, ugCode, 'PG', 1, '10.1.0.2')).toMatchObject({ ok: false, error: 'SECTION_MISMATCH' });
   });
 
-  it("a team's registration locks once it starts a quiz; other registrations stay open", async () => {
+  it('one section can be live while the other is still in setup', async () => {
     await org('start_quiz', [], 'UG');
     const s = (await db.query('select section, status from public.quiz_sessions where is_current order by section')).rows;
     expect(s).toEqual([{ section: 'PG', status: 'setup' }, { section: 'UG', status: 'running' }]);
-    const ug = await teamRow('UG', 1);
-    expect((await staff('reg_save_team', [{ ...team(1), id: ug.id, section: 'UG', team_name: 'Edited before start' }])).id).toBe(ug.id);
-    const tok = (await anon('join_team', [ugCode, 1, await pinOf('UG', 1), null], '10.1.0.4')).token;
-    await anon('participant_start', [tok]);
-    expect(await errCode(staff('reg_save_team', [{ ...team(1), id: ug.id, section: 'UG', team_name: 'Late edit' }]))).toBe('REGISTRATION_LOCKED');
-    expect((await staff('reg_overview')).teams.find((t) => t.id === ug.id).locked).toBe(true);
-    expect((await staff('reg_save_team', [team(60, { section: 'UG' })])).id).toBeTruthy(); // new teams can always register
-    const pg = await teamRow('PG', 2);
-    expect((await staff('reg_save_team', [{ ...team(2), id: pg.id, section: 'PG', team_name: 'PG renamed' }])).id).toBe(pg.id);
+    const tok = (await attachTeam(db, ugCode, 'UG', 1, '10.1.0.4')).token;
+    expect((await anon('participant_start', [tok])).ok).toBe(true);
     await org('end_quiz', [], 'UG');
   });
 });

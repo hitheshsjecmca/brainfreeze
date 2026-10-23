@@ -8,6 +8,7 @@ import { round1TeamStatus } from '../lib/rounds.js';
 import { parseCSVObjects, teamTemplateCSV, toCSV, TEAM_CSV_HEADERS, TEAM_EXPORT_HEADERS } from '../lib/csv.js';
 import { downloadText, readFileText, stamp } from '../lib/download.js';
 import { validateTeam } from '../lib/validation.js';
+import { participantNames } from '../lib/teamSelection.js';
 import { DEMO_TEAMS } from '../data/demoTeams.js';
 
 function nextFreeNumber(teams) {
@@ -38,7 +39,7 @@ export default function Teams() {
     const s = query.trim().toLowerCase();
     return all.filter((t) => (view === 'ALL' || t.section === view)
       && (!s || String(t.team_number) === s.replace(/^t/, '')
-        || [t.team_name, t.participant_1, t.participant_2, t.college_name || ''].some((v) => v.toLowerCase().includes(s))));
+        || [t.team_name, t.participant_1, t.participant_2 || '', t.college_name || ''].some((v) => v.toLowerCase().includes(s))));
   }, [all, query, view]);
 
   async function remove(team) {
@@ -113,7 +114,7 @@ export default function Teams() {
       </div>
 
       {all.length === 0 ? (
-        <EmptyState icon={Users} title="No teams yet"><p className="muted">Add teams one by one, import the CSV template, or use the registration desk.</p></EmptyState>
+        <EmptyState icon={Users} title="No teams yet"><p className="muted">Participants are added automatically when they join a quiz with its code. You can also add teams one by one or import the CSV template (e.g. for paper answer sheets).</p></EmptyState>
       ) : (
         <div className="table-wrap glass">
           <table className="table">
@@ -128,7 +129,7 @@ export default function Teams() {
                     <td><span className="badge badge-section">{t.section}</span></td>
                     <td className="num">{t.team_number}</td>
                     <td>{t.team_name} {t.is_demo && <span className="badge badge-amber badge-xs">DEMO</span>}</td>
-                    <td className="small">{t.participant_1} &amp; {t.participant_2}</td>
+                    <td className="small">{participantNames(t)}{t.join_session_id && <> <span className="badge badge-muted badge-xs">self-joined</span></>}</td>
                     <td>{t.college_name || <span className="badge badge-amber badge-xs">missing</span>}</td>
                     <td>
                       {st.key === 'none' ? <span className="muted small">{st.label}</span>
@@ -159,7 +160,8 @@ function TeamForm({ team, teams, onClose }) {
   const { act } = useQuiz();
   const [form, setForm] = useState(team);
   const [touched, setTouched] = useState(false);
-  const check = validateTeam({ ...form, section: team.section }, teams, team.id || null);
+  const solo = !!team.join_session_id; // a self-joined participant: one person
+  const check = validateTeam({ ...form, section: team.section }, teams, team.id || null, { requirePartner: !solo });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   async function submit(e) {
@@ -183,13 +185,13 @@ function TeamForm({ team, teams, onClose }) {
         <Field label="Participant 1" error={err('participant_1')}>
           <input value={form.participant_1} onChange={set('participant_1')} maxLength={80} required />
         </Field>
-        <Field label="Participant 2" error={err('participant_2')}>
-          <input value={form.participant_2} onChange={set('participant_2')} maxLength={80} required />
+        <Field label={solo ? 'Participant 2 (optional)' : 'Participant 2'} error={err('participant_2')}>
+          <input value={form.participant_2 || ''} onChange={set('participant_2')} maxLength={80} required={!solo} />
         </Field>
         <Field label="College name" error={err('college_name')}>
           <input value={form.college_name || ''} onChange={set('college_name')} maxLength={120} required />
         </Field>
-        <p className="muted small span-2">Section: <b>{team.section}</b>. Registration staff can also edit teams that have not started a quiz.</p>
+        <p className="muted small span-2">Section: <b>{team.section}</b>. {solo ? 'This participant joined a quiz with its code.' : 'Participants who join with a code are added automatically.'}</p>
         <div className="modal-actions span-2">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary">Save team</button>

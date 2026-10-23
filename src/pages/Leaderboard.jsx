@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Download, Info, MonitorPlay, Search } from 'lucide-react';
 import { useQuiz } from '../context/QuizContext.jsx';
 import { EmptyState, PageHeader } from '../components/Common.jsx';
@@ -13,12 +13,14 @@ export default function Leaderboard() {
   const { settings, session } = snap;
   const onProjector = session.projector_view === 'leaderboard';
   const tied = new Set(qualification?.tied || []);
+  const teamById = useMemo(() => new Map(snap.teams.map((t) => [t.id, t])), [snap.teams]);
   const s = query.trim().toLowerCase();
-  const rows = s ? standings.filter((r) => String(r.team_number) === s.replace(/^t/, '') || r.team_name.toLowerCase().includes(s)) : standings;
+  const rows = s ? standings.filter((r) => String(r.team_number) === s.replace(/^t/, '') || r.team_name.toLowerCase().includes(s)
+    || (teamById.get(r.team_id)?.college_name || '').toLowerCase().includes(s)) : standings;
 
   return (
     <div className="page">
-      <PageHeader title={`Live leaderboard — ${session.name}`} subtitle={`${standings.length} teams · updates after every recorded answer${lastSync ? ` · last sync ${new Date(lastSync).toLocaleTimeString()}` : ''}`}>
+      <PageHeader title={`Live leaderboard — ${session.name}`} subtitle={`${session.section} · ${standings.length} participant(s) · updates after every recorded answer${lastSync ? ` · last sync ${new Date(lastSync).toLocaleTimeString()}` : ''}`}>
         <button className={`btn ${onProjector ? 'btn-ice' : 'btn-ghost'}`} aria-pressed={onProjector}
           onClick={() => act('setProjectorView', { view: onProjector ? 'question' : 'leaderboard' }, { key: 'view', success: onProjector ? 'Leaderboard hidden from projector' : 'Leaderboard shown on projector' })}>
           <MonitorPlay size={16} /> {onProjector ? 'Hide from projector' : 'Show on projector'}
@@ -42,16 +44,16 @@ export default function Leaderboard() {
       <div className="toolbar">
         <label className="search">
           <Search size={16} aria-hidden="true" />
-          <input type="search" placeholder="Find team…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search leaderboard" />
+          <input type="search" placeholder="Find name, number or college…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search leaderboard" />
         </label>
         {qualification?.unresolved && <span className="badge badge-danger">Tie at cut-off: {qualification.tied.length} teams for {qualification.slots} slot(s)</span>}
       </div>
 
-      {standings.length === 0 ? <EmptyState title="No teams registered" /> : (
+      {standings.length === 0 ? <EmptyState title="No participants yet"><p className="muted">Participants appear here once they join with the set's code.</p></EmptyState> : (
         <div className="table-wrap glass">
           <table className="table leaderboard-table">
             <thead>
-              <tr><th scope="col">Rank</th><th scope="col">Team no.</th><th scope="col">Team name</th><th scope="col">Score</th><th scope="col">Correct</th><th scope="col">Incorrect</th><th scope="col">Unanswered</th><th scope="col">Elapsed</th><th scope="col">Tie</th></tr>
+              <tr><th scope="col">Rank</th><th scope="col">No.</th><th scope="col">Name</th><th scope="col">College</th><th scope="col">Section</th><th scope="col">Score</th><th scope="col">Correct</th><th scope="col">Incorrect</th><th scope="col">Unanswered</th><th scope="col">Elapsed</th><th scope="col">Tie</th></tr>
             </thead>
             <tbody>
               {rows.map((r) => (
@@ -59,6 +61,8 @@ export default function Leaderboard() {
                   <td className="num"><b>{r.rank}</b>{r.tied && <span className="tie-mark" title="Shared rank">=</span>}</td>
                   <td className="num">{r.team_number}</td>
                   <td>{r.team_name} {r.is_demo && <span className="badge badge-amber badge-xs">DEMO</span>}</td>
+                  <td className="small">{teamById.get(r.team_id)?.college_name || <span className="muted">—</span>}</td>
+                  <td><span className="badge badge-section badge-xs">{teamById.get(r.team_id)?.section || session.section}</span></td>
                   <td className="num score">{formatPoints(r.points)}</td>
                   <td className="num ok-text">{r.correct}</td>
                   <td className="num danger-text">{r.incorrect}</td>

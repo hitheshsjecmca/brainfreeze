@@ -60,7 +60,7 @@ function ParticipantsEditor() {
           <p><b>{draft.length}</b> {s.section} team(s) will take part in <b>{s.name}</b>{added.length || removed.length ? ` (+${added.length}, −${removed.length})` : ''}.</p>
           {draft.length > 0 && <p className="small">{selectionNames(draft, snap.teams)}</p>}
           {removed.length > 0 && <p className="small warn-text">Removed teams can no longer join; a removed team that joined but has not started is signed out.</p>}
-          {!draft.length && <p className="small warn-text">No team is selected — the set cannot go live until you choose its participants.</p>}
+          {!draft.length && <p className="small muted">No one is listed yet — participants are added as they join.</p>}
         </div>
       ),
     });
@@ -72,7 +72,7 @@ function ParticipantsEditor() {
 
   return (
     <div className="page">
-      <PageHeader title={`Participants — ${s.name}`} subtitle={`${s.section} quiz set · ${SET_STAGE_LABELS[stage]}. Choose which registered ${s.section} teams take part in this set. Only they can join with the code, be scored on paper and appear in its results. Nothing is carried over from other sets or rounds, and there is no fixed number of teams.`}>
+      <PageHeader title={`Participants — ${s.name}`} subtitle={`${s.section} quiz set · ${SET_STAGE_LABELS[stage]}. Participants join themselves with the code, their name and their college, and are listed here automatically. Optionally add registered teams for paper answer sheets. Nothing is carried over from other sets or rounds.`}>
         <span className="badge badge-ice"><Users size={14} /> {saved.length} confirmed</span>
       </PageHeader>
 
@@ -81,9 +81,9 @@ function ParticipantsEditor() {
 
       <div className="two-col">
         <section className="panel glass" aria-labelledby="r1p-pick">
-          <h2 id="r1p-pick">Select teams</h2>
+          <h2 id="r1p-pick">Participants of this set</h2>
           {snap.teams.length === 0 ? (
-            <p className="muted">No {SECTION_LABELS[s.section] || s.section} teams are registered yet. Add them on the <Link to="/host/teams">Teams</Link> page or at the registration desk.</p>
+            <p className="muted">No {SECTION_LABELS[s.section] || s.section} teams are registered yet. Participants appear here as they join with the code. You can also add teams on the <Link to="/host/teams">Teams</Link> page for paper answer sheets.</p>
           ) : (
             <TeamPicker teams={snap.teams} value={draft} onChange={setDraft} label={`Registered ${s.section} teams`} disabled={final}
               locked={live ? started : () => null} unavailable={unavailable} />
@@ -106,7 +106,7 @@ function ParticipantsEditor() {
               <button className="btn btn-ghost" onClick={() => setDraft(saved)} disabled={!dirty}><RotateCcw size={16} /> Discard changes</button>
             </div>
           )}
-          <p className="muted small">The set can go live only after at least one participant is confirmed. Round 2 has its own, separate team selection.</p>
+          <p className="muted small">No pre-registration is needed: the set can go live at any time and participants can join before or after. Round 2 has its own, separate team selection.</p>
         </section>
       </div>
     </div>

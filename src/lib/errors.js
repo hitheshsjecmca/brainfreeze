@@ -13,7 +13,7 @@ export const ERROR_MESSAGES = {
   ALREADY_RECORDED: 'An answer is already recorded for this team and question. Use a correction to change it.',
   NO_CHANGE: 'The recorded answer is already the same — nothing changed.',
   REASON_REQUIRED: 'A reason is required for this action.',
-  INVALID_OPTION: 'The answer must be A, B, C, D or unanswered.',
+  INVALID_OPTION: "The answer must be one of the question's options (A–F) or unanswered.",
   NO_ANSWER_KEY: 'This question has no answer key.',
   TEAM_NOT_FOUND: 'Team not found.',
   QUESTION_NOT_FOUND: 'Question not found.',
@@ -29,7 +29,7 @@ export const ERROR_MESSAGES = {
   TEAM_HAS_ANSWERS: 'This team has recorded answers. Confirm to delete the team and its answers.',
   QUESTION_HAS_ANSWERS: 'This question has recorded answers. Confirm to delete it and remove those scores.',
   VALIDATION: 'Some fields are invalid.',
-  QUIZ_NOT_READY: 'The quiz cannot start until the question bank and teams pass validation.',
+  QUIZ_NOT_READY: 'The quiz cannot start until every question passes validation.',
   QUIZ_NOT_ENDED: 'End the quiz before confirming the results.',
   QUALIFIER_COUNT: 'The number of highlighted teams is wrong.',
   QUALIFIERS_MISMATCH: 'The selected teams do not match the computed top positions.',
@@ -51,7 +51,7 @@ export const ERROR_MESSAGES = {
   CODE_GENERATION_FAILED: 'Could not generate a unique join code. Try again.',
   INVALID_CODE: 'That code is not valid. Check the six digits — the quiz may not be published yet, or it has ended.',
   INVALID_TEAM_OR_PIN: 'Team number or PIN is incorrect. Check your team slip or ask an organizer.',
-  REGISTRATION_CLOSED: 'Registration is closed. Ask an organizer for help.',
+  REGISTRATION_CLOSED: 'Joining is closed for this quiz. Ask an organizer for help.',
   SELF_REGISTRATION_CLOSED: 'New-team registration is not open. Choose your registered team from the list.',
   TEAM_ALREADY_JOINED: 'This team has already joined on another device. Ask an organizer to release it, then try again.',
   TEAM_NOT_REGISTERED: 'That team is not registered for this section. Ask an organizer for help.',
@@ -59,7 +59,9 @@ export const ERROR_MESSAGES = {
   TEAM_ALREADY_CONNECTED: 'This team is already signed in on another device. Ask an organizer to disconnect it, or wait a minute and try again.',
   TEAM_NAME_TAKEN: 'A team with that name already exists. If it is your team, choose it from the list of registered teams.',
   RATE_LIMITED: 'Too many failed attempts from this network. Wait a few minutes or ask an organizer.',
-  SESSION_INVALID: 'This device is no longer signed in to the quiz. Join again with the code and choose your team.',
+  SESSION_INVALID: 'This device is no longer signed in to the quiz. Join again with the code and your details.',
+  ALREADY_JOINED: 'Someone with this name and college has already joined this quiz on another device. If that was you, ask an organizer to release that device, then join again.',
+  PARTICIPANT_REMOVED: 'An organizer removed you from this quiz. Ask an organizer for help.',
   SESSION_REVOKED: 'This device was signed out.',
   NOT_ACCEPTING: 'Answers are not being accepted right now.',
   NOT_CURRENT_QUESTION: 'The organizer has moved to a different question.',
@@ -97,7 +99,7 @@ const OUTDATED_COUNT_RULE = /30 to 60|at most 60/;
 export const OUTDATED_DATABASE_MESSAGE = 'The database still enforces the old 30–60 question rule. Apply supabase/migrations/20261018000100_round1_simplify_setup.sql to the Supabase project, then publish again.';
 
 // The newest migration always re-applies the complete function permission set (and is safe to re-run).
-export const PERMISSIONS_REPAIR_MIGRATION = '20261026000100_round2_wrong_scores_zero.sql';
+export const PERMISSIONS_REPAIR_MIGRATION = '20261027000100_fresh_sets_options_self_join.sql';
 
 // Normalize anything thrown by Supabase / fetch / engine into a QuizError.
 export function toQuizError(err) {

@@ -9,7 +9,8 @@ import { StatusBadge } from '../components/Common.jsx';
 import { OptionGrid } from '../components/QuizBits.jsx';
 import { OPTION_STYLE } from '../components/optionStyle.js';
 import { useRemaining } from '../lib/hooks.js';
-import { EVENT_LABELS, OPTIONS } from '../lib/constants.js';
+import { EVENT_LABELS } from '../lib/constants.js';
+import { optionLetters } from '../lib/options.js';
 import { evaluateAnswer, marksFor, signedPoints } from '../lib/scoring.js';
 import { quizReadinessIssues, quizReadinessWarnings } from '../lib/validation.js';
 import { minutes } from '../lib/sets.js';
@@ -39,7 +40,7 @@ export default function LiveHost() {
 
 // ------------------------------------------------------------------ controls
 function ControlBar() {
-  const { snap, act, pendingKeys } = useQuiz();
+  const { snap, act, pendingKeys, quizQuestions } = useQuiz();
   const { confirm } = useUI();
   const { session, settings } = snap;
   const s = session.status;
@@ -50,8 +51,8 @@ function ControlBar() {
       await confirm({ title: 'Publish the set first', message: <p>Review and publish the set on the “Set setup &amp; join” tab. Only a published (frozen) set can go live.</p>, confirmLabel: 'OK' });
       return;
     }
-    const issues = quizReadinessIssues(snap);
-    const warnings = quizReadinessWarnings(snap);
+    const issues = quizReadinessIssues({ questions: quizQuestions });
+    const warnings = quizReadinessWarnings({ teams: snap.teams, questions: quizQuestions });
     if (issues.length) {
       await confirm({ title: 'Set is not ready', message: <ul className="issue-list">{issues.slice(0, 10).map((i) => <li key={i}>{i}</li>)}</ul>, confirmLabel: 'OK' });
       return;
@@ -60,12 +61,12 @@ function ControlBar() {
       title: `Go live with “${session.name}”?`, confirmLabel: 'Go live',
       message: (
         <>
-          <p>Joined {session.section} teams can now press <b>Start</b>. Each team gets its own {minutes(settings.duration_seconds)}-minute deadline, recorded by the server when it presses Start.</p>
+          <p>Joined {session.section} participants can now press <b>Start</b> (others can still join with the code). Each team gets its own {minutes(settings.duration_seconds)}-minute deadline, recorded by the server when it presses Start.</p>
           {warnings.length > 0 && <ul className="issue-list warn">{warnings.map((w) => <li key={w}><AlertTriangle size={14} /> {w}</li>)}</ul>}
         </>
       ),
     });
-    if (ok) act('startQuiz', {}, { success: 'Set is live — teams can start' });
+    if (ok) act('startQuiz', {}, { success: 'Set is live — participants can start' });
   }
 
   async function endQuiz() {
@@ -313,7 +314,7 @@ function ByQuestion({ currentQuestion }) {
       return;
     }
     const k = e.key.toUpperCase();
-    if (OPTIONS.includes(k) && team) { e.preventDefault(); setSelected(k); setReviewing(false); }
+    if (optionLetters(question || {}).includes(k) && team) { e.preventDefault(); setSelected(k); setReviewing(false); }
     else if (k === 'U' && team) { e.preventDefault(); setSelected(null); setReviewing(false); }
     else if (e.key === 'Enter' && team && selected !== undefined) { e.preventDefault(); submit(); }
     else if (e.key === 'Escape') { e.preventDefault(); resetEntry(); }
@@ -357,7 +358,7 @@ function ByQuestion({ currentQuestion }) {
             {existing && <span className="badge badge-amber">Recorded: {existing.selected_option ?? 'Unanswered'} ({RESULT_TEXT[existing.result]})</span>}
           </div>
           <div className="answer-buttons" role="radiogroup" aria-label="Team answer">
-            {OPTIONS.map((l) => {
+            {optionLetters(question).map((l) => {
               const { cls, Icon } = OPTION_STYLE[l];
               return (
                 <button key={l} role="radio" aria-checked={selected === l} className={`answer-btn ${cls} ${selected === l ? 'selected' : ''}`} onClick={() => { setSelected(l); setReviewing(false); }}>
@@ -391,7 +392,7 @@ function ByQuestion({ currentQuestion }) {
           </div>
         </div>
       ) : (
-        <p className="muted">Pick a team to record its answer. Keys: <kbd>A</kbd>–<kbd>D</kbd>, <kbd>U</kbd> unanswered, <kbd>Enter</kbd> submit → confirm, <kbd>Esc</kbd> clear.</p>
+        <p className="muted">Pick a team to record its answer. Keys: <kbd>A</kbd>–<kbd>{optionLetters(question).slice(-1)[0]}</kbd>, <kbd>U</kbd> unanswered, <kbd>Enter</kbd> submit → confirm, <kbd>Esc</kbd> clear.</p>
       )}
     </div>
   );
@@ -457,7 +458,7 @@ function TeamSheet() {
             <div key={q.id} className={`sheet-row ${a ? `rec-${a.result}` : ''}`}>
               <span className="sheet-q">Q{num(q)}</span>
               <div className="sheet-opts" role="radiogroup" aria-label={`Answer for Q${num(q)}`}>
-                {[...OPTIONS, null].map((l) => (
+                {[...optionLetters(q), null].map((l) => (
                   <button key={l ?? 'u'} role="radio" aria-checked={d === l || (d === undefined && a?.selected_option === l && !!a)}
                     className={`mini-opt ${l ? OPTION_STYLE[l].cls : 'opt-u'} ${d === l ? 'selected' : ''} ${d === undefined && a && a.selected_option === l ? 'recorded' : ''}`}
                     onClick={() => setDraft((x) => ({ ...x, [q.id]: l }))}>{l ?? '–'}</button>

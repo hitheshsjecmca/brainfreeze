@@ -23,7 +23,9 @@ function world(bankSize = 64) {
   let s = createEmptyState(T0);
   s = run(s, 'importQuestions', { items: Array.from({ length: bankSize }, (_, i) => mcq(i)) });
   const c = call(s, 'createSet', { name: 'UG Morning Set A', section: 'UG' });
-  return [c.state, c.result.id];
+  // A new set starts EMPTY; these tests then choose the whole bank explicitly.
+  const all = run(c.state, 'updateQuizDetails', { question_ids: c.state.questions.map((q) => q.id) }, c.result.id);
+  return [all, c.result.id];
 }
 const bankOf = (s) => new Map(s.questions.map((q) => [q.id, q]));
 const serverForm = (s, id) => { const v = setView(s, id); return formFromSet(v.session, v.settings, sessionQuestions(v).map((q) => q.id)); };
@@ -64,7 +66,7 @@ describe('wizard steps and navigation', () => {
   it('later steps are reachable only when the earlier ones are valid; resume picks the right step', () => {
     const [s, id] = world();
     const bank = bankOf(s);
-    const form = serverForm(s, id); // a new draft starts with the whole bank (64) selected — allowed
+    const form = serverForm(s, id); // the whole bank (64) chosen — allowed
     expect(form.question_ids).toHaveLength(64);
     expect(maxReachableStep(form, bank)).toBe(3);
     form.rules = { ...form.rules, duration_minutes: '0' };
@@ -155,13 +157,15 @@ describe('draft persistence', () => {
     expect(resumeStep(reopened, bankOf(s))).toBe(3);
   });
 
-  it('only changed fields are sent, and an empty selection is never sent', () => {
+  it('only changed fields are sent; an empty selection is saved like any other (a draft may be empty)', () => {
     const [s, id] = world();
     const server = serverForm(s, id);
     expect(draftChanges({ ...server, rules: { ...server.rules, duration_minutes: '30' } }, server)).toEqual({ details: null, settings: null, emptySelection: false });
     expect(draftChanges({ ...server, section: 'PG' }, server).details).toEqual({ section: 'PG' });
     const empty = draftChanges({ ...server, question_ids: [] }, server);
-    expect(empty).toMatchObject({ details: null, emptySelection: true });
+    expect(empty).toMatchObject({ details: { question_ids: [] }, emptySelection: false });
+    const saved = run(s, 'updateQuizDetails', empty.details, id);
+    expect(serverForm(saved, id).question_ids).toEqual([]);
     expect(isDirty({ ...server, question_ids: [] }, server)).toBe(true);
   });
 
@@ -187,10 +191,11 @@ describe('draft persistence', () => {
 describe('CSV import checks', () => {
   it('parses CSV and JSON and reports missing columns', () => {
     const items = parseQuestionFile(questionTemplateCSV(), 'q.csv');
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(4); // 4-, 2- and 6-option examples
     expect(items[0]).toMatchObject({ correct_option: 'B', __line: 2 });
+    expect(checkQuestionImport(items).ok).toBe(true);
     expect(parseQuestionFile(JSON.stringify({ questions: [mcq(1)] }), 'q.json')).toHaveLength(1);
-    expect(() => parseQuestionFile('question_text,option_a\nx,y', 'q.csv')).toThrow('Missing CSV columns: option_b, option_c, option_d, correct_option');
+    expect(() => parseQuestionFile('question_text,option_a\nx,y', 'q.csv')).toThrow('Missing CSV columns: option_b, correct_option');
     expect(() => parseQuestionFile('question_text,option_a,option_b,option_c,option_d,correct_option\n', 'q.csv')).toThrow('No questions found');
     expect(() => parseQuestionFile('{"x":1}', 'q.json')).toThrow(/array of questions/);
   });

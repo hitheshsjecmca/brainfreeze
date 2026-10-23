@@ -30,7 +30,8 @@ export function useParticipantStatus() {
     // Teams in this set's results; the others take part in another set of the section.
     const result = new Set((snap.results || []).map((r) => r.team_id));
     for (const a of snap.answers) if (inQuiz.has(a.question_id)) counts.set(a.team_id, (counts.get(a.team_id) || 0) + 1);
-    const rows = snap.teams.map((t) => {
+    // A participant who joined ANOTHER set with its code belongs only to that set.
+    const rows = snap.teams.filter((t) => !t.join_session_id || t.join_session_id === snap.session.id).map((t) => {
       const mine = sessions.filter((p) => p.team_id === t.id);
       const active = mine.find((p) => !p.revoked_at);
       const seenMs = active ? now - Date.parse(active.last_seen_at) : null;

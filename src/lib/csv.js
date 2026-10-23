@@ -52,7 +52,8 @@ export function toCSV(headers, rows) {
 // Required import columns. An optional `section` column must match the section being imported into.
 export const TEAM_CSV_HEADERS = ['team_number', 'team_name', 'participant_1', 'participant_2', 'college_name'];
 export const TEAM_EXPORT_HEADERS = ['section', ...TEAM_CSV_HEADERS];
-export const QUESTION_CSV_HEADERS = ['question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'correct_option', 'explanation', 'image_url', 'category', 'marks_correct', 'marks_incorrect'];
+// option_e / option_f (and option_c / option_d) may be empty: a question has 2 to 6 options.
+export const QUESTION_CSV_HEADERS = ['question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'option_e', 'option_f', 'correct_option', 'explanation', 'image_url', 'category', 'marks_correct', 'marks_incorrect'];
 
 export function teamTemplateCSV() {
   return toCSV(TEAM_CSV_HEADERS, [
@@ -63,8 +64,10 @@ export function teamTemplateCSV() {
 
 export function questionTemplateCSV() {
   return toCSV(QUESTION_CSV_HEADERS, [
-    ['Which data structure works first-in, first-out?', 'Stack', 'Queue', 'Tree', 'Graph', 'B', '', '', 'Data structures', '', ''],
-    ['What does CPU stand for?', 'Central Processing Unit', 'Computer Personal Unit', 'Central Program Utility', 'Core Processing Unit', 'A', '', '', 'Hardware', '', ''],
+    ['Which data structure works first-in, first-out?', 'Stack', 'Queue', 'Tree', 'Graph', '', '', 'B', '', '', 'Data structures', '', ''],
+    ['What does CPU stand for?', 'Central Processing Unit', 'Computer Personal Unit', 'Central Program Utility', 'Core Processing Unit', '', '', 'A', '', '', 'Hardware', '', ''],
+    ['HTTP is a stateless protocol.', 'True', 'False', '', '', '', '', 'A', '', '', 'Networking', '', ''],
+    ['Which of these is NOT a programming language?', 'Python', 'Rust', 'Kotlin', 'Linux', 'Go', 'Swift', 'D', '', '', 'Languages', '', ''],
   ]);
 }
 

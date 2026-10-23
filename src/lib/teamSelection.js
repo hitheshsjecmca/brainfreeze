@@ -27,5 +27,8 @@ export function selectionProblem(ids, teams, { min = 0 } = {}) {
   return null;
 }
 
+/** "Asha & Ravi" for a team of two; just the name for a self-joined participant. */
+export const participantNames = (t) => (t.participant_2 ? `${t.participant_1} & ${t.participant_2}` : t.participant_1 || '');
+
 /** "T3 Frost Byte, T7 Null Pointers" in selection order. */
 export const selectionNames = (ids, teams) => ids.map((id) => teams.find((t) => t.id === id)).filter(Boolean).map((t) => `T${t.team_number} ${t.team_name}`).join(', ');

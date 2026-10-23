@@ -86,7 +86,7 @@ export default function ParticipantMonitor({ compact = false }) {
           <tbody>
             {status.rows.map((r) => (
               <tr key={r.team.id} className={r.otherSet ? 'row-dim' : ''}>
-                <td><b>T{r.team.team_number}</b> {r.team.team_name} {r.team.self_registered && <span className="badge badge-purple badge-xs">self-registered</span>}</td>
+                <td><b>T{r.team.team_number}</b> {r.team.team_name} {r.team.join_session_id ? <span className="badge badge-purple badge-xs">joined with code</span> : r.team.self_registered && <span className="badge badge-purple badge-xs">self-registered</span>}{r.team.college_name && <><br /><small className="muted">{r.team.college_name}</small></>}</td>
                 <td>
                   {r.otherSet ? <span className="muted small">In another set</span> : r.device === 'stale' ? <span className="dev dev-stale">Last seen {ago(r.seenMs)}</span> : label[r.device]}
                   {r.device === 'signed-out' && r.lastRevoked?.revoked_reason && <small className="muted"> · {r.lastRevoked.revoked_reason}</small>}

@@ -1,4 +1,5 @@
-import { OPTIONS, OPTION_FIELDS } from '../lib/constants.js';
+import { OPTION_FIELDS } from '../lib/constants.js';
+import { optionLetters } from '../lib/options.js';
 import { formatClock } from '../lib/timer.js';
 import { useRemaining } from '../lib/hooks.js';
 import { OPTION_STYLE } from './optionStyle.js';
@@ -21,10 +22,11 @@ export function OptionTile({ letter, text, size = 'md', state, onClick, disabled
   );
 }
 
+/** The question's own options (2–6). Pass keyLetter only on organizer screens — never on the projector. */
 export function OptionGrid({ question, size = 'md', keyLetter = null }) {
   return (
     <div className={`option-grid option-grid-${size}`}>
-      {OPTIONS.map((l) => (
+      {optionLetters(question).map((l) => (
         <OptionTile key={l} letter={l} text={question[OPTION_FIELDS[l]]} size={size} state={keyLetter ? (keyLetter === l ? 'key' : 'dim') : null} />
       ))}
     </div>
